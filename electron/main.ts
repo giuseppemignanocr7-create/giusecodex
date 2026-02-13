@@ -74,7 +74,7 @@ function createWindow(): void {
     backgroundColor: '#1a1b26',
     titleBarStyle: 'default',
     webPreferences: {
-      preload: path.join(__dirname, 'preload.js'),
+      preload: path.join(__dirname, 'preload.cjs'),
       nodeIntegration: false,
       contextIsolation: true,
     },

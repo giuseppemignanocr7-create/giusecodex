@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "main": "electron/main.js",
+  "main": "electron/main.cjs",
   "scripts": {
     "dev": "concurrently \"npm run dev:server\" \"npm run dev:client\"",
     "dev:client": "vite",
@@ -11,7 +11,7 @@
     "build": "vite build",
     "preview": "vite preview",
     "electron:dev": "concurrently \"npm run dev:client\" \"npm run dev:server\" \"npx tsx electron/main.ts\"",
-    "electron:build": "npm run build && npx tsc electron/main.ts electron/preload.ts --outDir electron --esModuleInterop --module commonjs --target ES2022 --skipLibCheck",
+    "electron:build": "npm run build && npx esbuild electron/main.ts --bundle --platform=node --outfile=electron/main.cjs --external:electron --format=cjs && npx esbuild electron/preload.ts --bundle --platform=node --outfile=electron/preload.cjs --external:electron --format=cjs",
     "electron:package": "npm run electron:build && npx electron-builder --win"
   },
   "dependencies": {
@@ -41,6 +41,7 @@
     "concurrently": "^9.1.0",
     "electron": "^40.4.1",
     "electron-builder": "^26.7.0",
+    "esbuild": "^0.27.3",
     "postcss": "^8.5.0",
     "tailwindcss": "^3.4.0",
     "tsx": "^4.19.0",

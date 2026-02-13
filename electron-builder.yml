@@ -8,8 +8,8 @@ directories:
 
 files:
   - dist/**/*
-  - electron/main.js
-  - electron/preload.js
+  - electron/main.cjs
+  - electron/preload.cjs
   - server/**/*
   - "!server/node_modules"
   - "!node_modules/@anthropic-ai/sdk/node_modules"

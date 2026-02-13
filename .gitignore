@@ -12,3 +12,6 @@ Thumbs.db
 
 .vercel
 .env*.local
+release/
+electron/*.cjs
+electron/*.js
