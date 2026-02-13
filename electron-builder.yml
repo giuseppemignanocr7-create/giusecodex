@@ -10,16 +10,12 @@ files:
   - dist/**/*
   - electron/main.cjs
   - electron/preload.cjs
-  - server/**/*
-  - "!server/node_modules"
-  - "!node_modules/@anthropic-ai/sdk/node_modules"
+  - server/bundle.cjs
   - node_modules/@anthropic-ai/**/*
-  - node_modules/express/**/*
-  - node_modules/cors/**/*
 
-extraResources:
-  - from: server/
-    to: server/
+asarUnpack:
+  - server/bundle.cjs
+  - node_modules/@anthropic-ai/**/*
 
 win:
   target:

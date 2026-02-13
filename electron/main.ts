@@ -19,11 +19,12 @@ function hasCodexCLI(): boolean {
 
 // ──── Start Express server ────
 function startServer(): void {
+  const distPath = isDev ? '' : path.join(app.getAppPath(), 'dist');
   const env = {
     ...process.env,
     PORT: String(SERVER_PORT),
     CODEX_AVAILABLE: hasCodexCLI() ? '1' : '0',
-    STATIC_DIR: isDev ? '' : path.join(app.getAppPath(), 'dist'),
+    STATIC_DIR: distPath,
   };
 
   if (isDev) {
@@ -35,12 +36,15 @@ function startServer(): void {
       stdio: 'pipe',
     });
   } else {
-    // In packaged mode, use npx tsx from the system PATH
-    const serverEntry = path.join(process.resourcesPath, 'server', 'index.ts');
-    serverProcess = spawn('npx', ['tsx', serverEntry], {
-      cwd: process.resourcesPath,
-      env,
-      shell: true,
+    // In packaged mode, run the pre-bundled server.cjs with Node.js
+    const serverBundle = path.join(app.getAppPath(), 'server', 'bundle.cjs');
+    const nodeExe = process.execPath; // Electron's node binary
+    serverProcess = spawn(nodeExe, ['--no-warnings', serverBundle], {
+      cwd: app.getAppPath(),
+      env: {
+        ...env,
+        ELECTRON_RUN_AS_NODE: '1', // Makes Electron binary act as plain Node.js
+      },
       stdio: 'pipe',
     });
   }
