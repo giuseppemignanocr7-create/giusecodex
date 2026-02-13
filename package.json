@@ -11,7 +11,7 @@
     "build": "vite build",
     "preview": "vite preview",
     "electron:dev": "concurrently \"npm run dev:client\" \"npm run dev:server\" \"npx tsx electron/main.ts\"",
-    "electron:build": "npm run build && npx esbuild electron/main.ts --bundle --platform=node --outfile=electron/main.cjs --external:electron --format=cjs && npx esbuild electron/preload.ts --bundle --platform=node --outfile=electron/preload.cjs --external:electron --format=cjs && npx esbuild server/index.ts --bundle --platform=node --outfile=server/bundle.cjs --format=cjs --external:@anthropic-ai/sdk",
+    "electron:build": "npm run build && npx esbuild electron/main.ts --bundle --platform=node --outfile=electron/main.cjs --external:electron --format=cjs && npx esbuild electron/preload.ts --bundle --platform=node --outfile=electron/preload.cjs --external:electron --format=cjs",
     "electron:package": "npm run electron:build && npx electron-builder --win"
   },
   "dependencies": {

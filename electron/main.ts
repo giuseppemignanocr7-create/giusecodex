@@ -1,9 +1,13 @@
-import { app, BrowserWindow, shell, session } from 'electron';
+import { app, BrowserWindow, shell, session, dialog } from 'electron';
 import path from 'path';
 import { execSync, spawn, ChildProcess } from 'child_process';
+import express from 'express';
+import cors from 'cors';
+import http from 'http';
 
 let mainWindow: BrowserWindow | null = null;
 let serverProcess: ChildProcess | null = null;
+let httpServer: http.Server | null = null;
 const SERVER_PORT = 4000;
 const isDev = !app.isPackaged;
 
@@ -17,46 +21,55 @@ function hasCodexCLI(): boolean {
   }
 }
 
-// ──── Start Express server ────
-function startServer(): void {
-  // In packaged mode, dist/ is unpacked outside asar at app.asar.unpacked/dist/
-  const distPath = isDev ? '' : path.join(app.getAppPath() + '.unpacked', 'dist');
-  const env = {
-    ...process.env,
-    PORT: String(SERVER_PORT),
-    CODEX_AVAILABLE: hasCodexCLI() ? '1' : '0',
-    STATIC_DIR: distPath,
-  };
+// ──── Start embedded Express server (packaged mode) ────
+function startEmbeddedServer(): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const distPath = path.join(app.getAppPath() + '.unpacked', 'dist');
+    const srv = express();
+    srv.use(cors());
+    srv.use(express.json({ limit: '10mb' }));
 
-  if (isDev) {
-    const serverEntry = path.join(__dirname, '..', 'server', 'index.ts');
-    serverProcess = spawn('npx', ['tsx', serverEntry], {
-      cwd: path.join(__dirname, '..'),
-      env,
-      shell: true,
-      stdio: 'pipe',
-    });
-  } else {
-    // In packaged mode, run the pre-bundled server.cjs (unpacked from asar)
-    const serverBundle = path.join(app.getAppPath() + '.unpacked', 'server', 'bundle.cjs');
-    const nodeExe = process.execPath; // Electron's node binary
-    serverProcess = spawn(nodeExe, ['--no-warnings', serverBundle], {
-      cwd: app.getAppPath(),
-      env: {
-        ...env,
-        ELECTRON_RUN_AS_NODE: '1', // Makes Electron binary act as plain Node.js
-      },
-      stdio: 'pipe',
-    });
-  }
+    // Serve frontend static files
+    srv.use(express.static(distPath));
 
-  serverProcess.stdout?.on('data', (d: Buffer) => console.log('[server]', d.toString().trim()));
-  serverProcess.stderr?.on('data', (d: Buffer) => console.error('[server]', d.toString().trim()));
-  serverProcess.on('error', (err) => console.error('[server] Failed to start:', err.message));
+    // Health check
+    srv.get('/api/health', (_req, res) => {
+      res.json({ status: 'ok', codex: hasCodexCLI(), embedded: true });
+    });
+
+    // SPA catch-all — serve index.html for all non-API routes
+    srv.get('*', (_req, res) => {
+      res.sendFile(path.join(distPath, 'index.html'));
+    });
+
+    httpServer = srv.listen(SERVER_PORT, () => {
+      console.log(`[GiuseCoder] Embedded server on http://localhost:${SERVER_PORT}`);
+      console.log(`[GiuseCoder] Static dir: ${distPath}`);
+      resolve();
+    });
+    httpServer.on('error', reject);
+  });
 }
 
-// ──── Wait for server to be ready ────
-async function waitForServer(maxRetries = 40): Promise<boolean> {
+// ──── Start dev server (dev mode only) ────
+function startDevServer(): void {
+  const serverEntry = path.join(__dirname, '..', 'server', 'index.ts');
+  serverProcess = spawn('npx', ['tsx', serverEntry], {
+    cwd: path.join(__dirname, '..'),
+    env: {
+      ...process.env,
+      PORT: String(SERVER_PORT),
+      CODEX_AVAILABLE: hasCodexCLI() ? '1' : '0',
+    },
+    shell: true,
+    stdio: 'pipe',
+  });
+  serverProcess.stdout?.on('data', (d: Buffer) => console.log('[server]', d.toString().trim()));
+  serverProcess.stderr?.on('data', (d: Buffer) => console.error('[server]', d.toString().trim()));
+}
+
+// ──── Wait for dev server to be ready ────
+async function waitForServer(maxRetries = 30): Promise<boolean> {
   for (let i = 0; i < maxRetries; i++) {
     try {
       const res = await fetch(`http://localhost:${SERVER_PORT}/api/health`);
@@ -82,21 +95,19 @@ function createWindow(): void {
       preload: path.join(__dirname, 'preload.cjs'),
       nodeIntegration: false,
       contextIsolation: true,
-      webSecurity: true,
     },
   });
 
-  // Always load from Express server so API calls (/api/*) work correctly
-  mainWindow.loadURL(`http://localhost:${SERVER_PORT}`);
-
   if (isDev) {
+    mainWindow.loadURL('http://localhost:5173');
     mainWindow.webContents.openDevTools({ mode: 'detach' });
+  } else {
+    mainWindow.loadURL(`http://localhost:${SERVER_PORT}`);
   }
 
   // Handle window.open: allow preview popups, external links in system browser
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
     if (url.startsWith('http://localhost') || url.startsWith('https://localhost')) {
-      // Allow preview popups to open as new Electron windows
       return {
         action: 'allow',
         overrideBrowserWindowOptions: {
@@ -107,7 +118,6 @@ function createWindow(): void {
         },
       };
     }
-    // External URLs open in system browser
     shell.openExternal(url);
     return { action: 'deny' };
   });
@@ -121,25 +131,19 @@ function createWindow(): void {
 app.whenReady().then(async () => {
   console.log('[GiuseCoder] Starting...');
   console.log('[GiuseCoder] Dev mode:', isDev);
-  console.log('[GiuseCoder] Codex CLI:', hasCodexCLI() ? 'GPT 5.3 available' : 'Not found, using GPT 5.2-codex API');
+  console.log('[GiuseCoder] App path:', app.getAppPath());
 
-  // Allow CORS for API calls
-  session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
-    callback({
-      responseHeaders: {
-        ...details.responseHeaders,
-        'Access-Control-Allow-Origin': ['*'],
-      },
-    });
-  });
-
-  startServer();
-
-  const serverReady = await waitForServer();
-  if (serverReady) {
-    console.log('[GiuseCoder] Server ready on port', SERVER_PORT);
-  } else {
-    console.error('[GiuseCoder] Server failed to start within timeout');
+  try {
+    if (isDev) {
+      startDevServer();
+      await waitForServer();
+    } else {
+      await startEmbeddedServer();
+    }
+    console.log('[GiuseCoder] Server ready');
+  } catch (err: any) {
+    console.error('[GiuseCoder] Server error:', err.message);
+    dialog.showErrorBox('Server Error', `Failed to start server: ${err.message}`);
   }
 
   createWindow();
@@ -150,16 +154,12 @@ app.whenReady().then(async () => {
 });
 
 app.on('window-all-closed', () => {
-  if (serverProcess) {
-    serverProcess.kill();
-    serverProcess = null;
-  }
+  if (serverProcess) { serverProcess.kill(); serverProcess = null; }
+  if (httpServer) { httpServer.close(); httpServer = null; }
   if (process.platform !== 'darwin') app.quit();
 });
 
 app.on('before-quit', () => {
-  if (serverProcess) {
-    serverProcess.kill();
-    serverProcess = null;
-  }
+  if (serverProcess) { serverProcess.kill(); serverProcess = null; }
+  if (httpServer) { httpServer.close(); httpServer = null; }
 });
