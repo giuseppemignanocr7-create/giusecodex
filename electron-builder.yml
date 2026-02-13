@@ -12,8 +12,7 @@ files:
   - electron/preload.cjs
   - package.json
 
-asarUnpack:
-  - dist/**/*
+asar: false
 
 win:
   target:

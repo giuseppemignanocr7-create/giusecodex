@@ -1,83 +1,24 @@
-import { app, BrowserWindow, shell, session, dialog } from 'electron';
+import { app, BrowserWindow, shell } from 'electron';
 import path from 'path';
-import { execSync, spawn, ChildProcess } from 'child_process';
-import express from 'express';
-import cors from 'cors';
-import http from 'http';
+import { execSync } from 'child_process';
+import fs from 'fs';
 
 let mainWindow: BrowserWindow | null = null;
-let serverProcess: ChildProcess | null = null;
-let httpServer: http.Server | null = null;
-const SERVER_PORT = 4000;
 const isDev = !app.isPackaged;
 
-// ──── Check if Codex CLI is available ────
-function hasCodexCLI(): boolean {
-  try {
-    execSync('codex --version', { stdio: 'ignore' });
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-// ──── Start embedded Express server (packaged mode) ────
-function startEmbeddedServer(): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const distPath = path.join(app.getAppPath() + '.unpacked', 'dist');
-    const srv = express();
-    srv.use(cors());
-    srv.use(express.json({ limit: '10mb' }));
-
-    // Serve frontend static files
-    srv.use(express.static(distPath));
-
-    // Health check
-    srv.get('/api/health', (_req, res) => {
-      res.json({ status: 'ok', codex: hasCodexCLI(), embedded: true });
-    });
-
-    // SPA catch-all — serve index.html for all non-API routes
-    srv.get('*', (_req, res) => {
-      res.sendFile(path.join(distPath, 'index.html'));
-    });
-
-    httpServer = srv.listen(SERVER_PORT, () => {
-      console.log(`[GiuseCoder] Embedded server on http://localhost:${SERVER_PORT}`);
-      console.log(`[GiuseCoder] Static dir: ${distPath}`);
-      resolve();
-    });
-    httpServer.on('error', reject);
-  });
-}
-
-// ──── Start dev server (dev mode only) ────
-function startDevServer(): void {
-  const serverEntry = path.join(__dirname, '..', 'server', 'index.ts');
-  serverProcess = spawn('npx', ['tsx', serverEntry], {
-    cwd: path.join(__dirname, '..'),
-    env: {
-      ...process.env,
-      PORT: String(SERVER_PORT),
-      CODEX_AVAILABLE: hasCodexCLI() ? '1' : '0',
-    },
-    shell: true,
-    stdio: 'pipe',
-  });
-  serverProcess.stdout?.on('data', (d: Buffer) => console.log('[server]', d.toString().trim()));
-  serverProcess.stderr?.on('data', (d: Buffer) => console.error('[server]', d.toString().trim()));
-}
-
-// ──── Wait for dev server to be ready ────
-async function waitForServer(maxRetries = 30): Promise<boolean> {
-  for (let i = 0; i < maxRetries; i++) {
-    try {
-      const res = await fetch(`http://localhost:${SERVER_PORT}/api/health`);
-      if (res.ok) return true;
-    } catch { /* not ready yet */ }
-    await new Promise(r => setTimeout(r, 500));
-  }
-  return false;
+// ──── Resolve dist path ────
+function getDistPath(): string {
+  if (isDev) return '';
+  // asar unpacked
+  const p1 = path.join(app.getAppPath() + '.unpacked', 'dist');
+  if (fs.existsSync(p1)) return p1;
+  // inside asar (fallback)
+  const p2 = path.join(app.getAppPath(), 'dist');
+  if (fs.existsSync(p2)) return p2;
+  // next to exe
+  const p3 = path.join(path.dirname(process.execPath), 'resources', 'dist');
+  if (fs.existsSync(p3)) return p3;
+  return p2;
 }
 
 // ──── Create main window ────
@@ -88,7 +29,6 @@ function createWindow(): void {
     minWidth: 900,
     minHeight: 600,
     title: 'GiuseCoder IDE',
-    icon: path.join(__dirname, '..', 'public', 'favicon.ico'),
     backgroundColor: '#1a1b26',
     titleBarStyle: 'default',
     webPreferences: {
@@ -102,7 +42,11 @@ function createWindow(): void {
     mainWindow.loadURL('http://localhost:5173');
     mainWindow.webContents.openDevTools({ mode: 'detach' });
   } else {
-    mainWindow.loadURL(`http://localhost:${SERVER_PORT}`);
+    const distPath = getDistPath();
+    const indexPath = path.join(distPath, 'index.html');
+    console.log('[GiuseCoder] Loading:', indexPath);
+    console.log('[GiuseCoder] Exists:', fs.existsSync(indexPath));
+    mainWindow.loadFile(indexPath);
   }
 
   // Handle window.open: allow preview popups, external links in system browser
@@ -128,23 +72,12 @@ function createWindow(): void {
 }
 
 // ──── App lifecycle ────
-app.whenReady().then(async () => {
+app.whenReady().then(() => {
   console.log('[GiuseCoder] Starting...');
-  console.log('[GiuseCoder] Dev mode:', isDev);
+  console.log('[GiuseCoder] Packaged:', app.isPackaged);
   console.log('[GiuseCoder] App path:', app.getAppPath());
-
-  try {
-    if (isDev) {
-      startDevServer();
-      await waitForServer();
-    } else {
-      await startEmbeddedServer();
-    }
-    console.log('[GiuseCoder] Server ready');
-  } catch (err: any) {
-    console.error('[GiuseCoder] Server error:', err.message);
-    dialog.showErrorBox('Server Error', `Failed to start server: ${err.message}`);
-  }
+  console.log('[GiuseCoder] Exe path:', process.execPath);
+  console.log('[GiuseCoder] Dist path:', getDistPath());
 
   createWindow();
 
@@ -154,12 +87,5 @@ app.whenReady().then(async () => {
 });
 
 app.on('window-all-closed', () => {
-  if (serverProcess) { serverProcess.kill(); serverProcess = null; }
-  if (httpServer) { httpServer.close(); httpServer = null; }
   if (process.platform !== 'darwin') app.quit();
-});
-
-app.on('before-quit', () => {
-  if (serverProcess) { serverProcess.kill(); serverProcess = null; }
-  if (httpServer) { httpServer.close(); httpServer = null; }
 });
