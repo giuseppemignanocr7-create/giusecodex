@@ -3,12 +3,14 @@ import { useSettings } from '../stores/settingsStore';
 import { useChat } from '../stores/chatStore';
 import { X, Check, AlertCircle, Loader2, Save, Eye, EyeOff, Zap } from 'lucide-react';
 
+const isElectron = typeof window !== 'undefined' && (window as any).giuseCoder?.isElectron;
+
 const MODELS = [
   { id: 'claude-opus-4-6', label: 'Opus 4.6', desc: 'CTO reasoning — Anthropic API key', color: 'bg-purple' },
   { id: 'claude-sonnet-4-20250514', label: 'Sonnet 4', desc: 'UI/design — Anthropic API key', color: 'bg-accent' },
   { id: 'claude-haiku-4-5-20251001', label: 'Haiku 4.5', desc: 'Fast triage — Anthropic API key', color: 'bg-green' },
-  { id: 'gpt-5.3-codex', label: 'GPT 5.3 Codex', desc: 'Code gen — ChatGPT auth (Codex CLI)', color: 'bg-yellow' },
-  { id: 'gpt-5.2', label: 'GPT 5.2', desc: 'General agentic — OpenAI API key', color: 'bg-yellow' },
+  ...(isElectron ? [{ id: 'gpt-5.3-codex', label: 'GPT 5.3 Codex', desc: 'Code gen — Local Codex CLI', color: 'bg-yellow' }] : []),
+  { id: 'gpt-5.2-codex', label: 'GPT 5.2 Codex', desc: 'Best code agent — OpenAI API key', color: 'bg-yellow' },
   { id: 'o3', label: 'o3', desc: 'Reasoning — OpenAI API key', color: 'bg-yellow' },
 ];
 

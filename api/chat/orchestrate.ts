@@ -158,8 +158,8 @@ export default async function handler(req: Request) {
 
       if (plan.needsCode && openaiKey) {
         tasks.push((async () => {
-          await send('step', { agent: 'codex', label: 'GPT 5.3 writing code...', status: 'running' });
-          results.code = await streamOpenAI(openaiKey, 'gpt-5.3-codex', CODEX_SYSTEM,
+          await send('step', { agent: 'codex', label: 'GPT 5.2-Codex writing code...', status: 'running' });
+          results.code = await streamOpenAI(openaiKey, 'gpt-5.2-codex', CODEX_SYSTEM,
             [...messages, { role: 'user', content: plan.codePrompt }], writer, encoder, 'codex');
           await send('step', { agent: 'codex', label: 'Code complete', status: 'done' });
         })());

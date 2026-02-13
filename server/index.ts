@@ -309,9 +309,22 @@ app.post('/api/chat/orchestrate', async (req, res) => {
   }
 });
 
+// ──── Health Check + Info ────
+
+const codexAvailable = process.env.CODEX_AVAILABLE === '1';
+
+app.get('/api/health', (_req, res) => {
+  res.json({
+    status: 'ok',
+    codex: codexAvailable,
+    codeModel: codexAvailable ? 'gpt-5.3-codex (CLI)' : 'gpt-5.2-codex (API)',
+  });
+});
+
 // ──── Start ────
 
-const PORT = parseInt(process.env.PORT || '3001');
+const PORT = parseInt(process.env.PORT || '4000');
 app.listen(PORT, () => {
   console.log(`GiuseCoder server running on http://localhost:${PORT}`);
+  console.log(`Code agent: ${codexAvailable ? 'GPT 5.3 Codex (CLI)' : 'GPT 5.2-codex (API fallback)'}`);
 });

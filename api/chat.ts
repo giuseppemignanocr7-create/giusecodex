@@ -22,7 +22,7 @@ Be concise and direct. Use markdown with code blocks.`;
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
         body: JSON.stringify({
-          model: model || 'gpt-5.3-codex',
+          model: model || 'gpt-5.2-codex',
           messages: [{ role: 'system', content: system }, ...messages],
           max_tokens: 8192,
           stream: true,

@@ -5,12 +5,15 @@ import { useProjects } from '../stores/projectStore';
 import { OrchestratorView, AgentStream } from './OrchestratorView';
 import { Send, Trash2, Zap, Bot, User, ChevronDown, FolderPlus, Folder, X } from 'lucide-react';
 
+// Detect if running in Electron (has Codex CLI for GPT 5.3)
+const isElectron = typeof window !== 'undefined' && (window as any).giuseCoder?.isElectron;
+
 const MODELS = [
   { id: 'claude-opus-4-6', label: 'Opus 4.6', desc: 'CTO reasoning', color: 'text-purple', provider: 'anthropic' },
   { id: 'claude-sonnet-4-20250514', label: 'Sonnet 4', desc: 'Balanced', color: 'text-accent', provider: 'anthropic' },
   { id: 'claude-haiku-4-5-20251001', label: 'Haiku 4.5', desc: 'Fast', color: 'text-green', provider: 'anthropic' },
-  { id: 'gpt-5.3-codex', label: 'GPT 5.3 Codex', desc: 'ChatGPT auth', color: 'text-yellow', provider: 'codex-cli' },
-  { id: 'gpt-5.2', label: 'GPT 5.2', desc: 'OpenAI API', color: 'text-yellow', provider: 'openai' },
+  ...(isElectron ? [{ id: 'gpt-5.3-codex', label: 'GPT 5.3 Codex', desc: 'Local CLI', color: 'text-yellow', provider: 'codex-cli' as const }] : []),
+  { id: 'gpt-5.2-codex', label: 'GPT 5.2 Codex', desc: 'Best code via API', color: 'text-yellow', provider: 'openai' },
   { id: 'o3', label: 'o3', desc: 'Reasoning', color: 'text-yellow', provider: 'openai' },
 ];
 

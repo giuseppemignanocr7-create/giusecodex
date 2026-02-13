@@ -1,0 +1,47 @@
+appId: com.giusecoder.ide
+productName: GiuseCoder
+copyright: Copyright © 2026 GiuseCoder
+
+directories:
+  output: release
+  buildResources: build
+
+files:
+  - dist/**/*
+  - electron/main.js
+  - electron/preload.js
+  - server/**/*
+  - "!server/node_modules"
+  - "!node_modules/@anthropic-ai/sdk/node_modules"
+  - node_modules/@anthropic-ai/**/*
+  - node_modules/express/**/*
+  - node_modules/cors/**/*
+
+extraResources:
+  - from: server/
+    to: server/
+
+win:
+  target:
+    - target: nsis
+      arch: [x64]
+  icon: public/favicon.ico
+
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: GiuseCoder
+
+mac:
+  target:
+    - target: dmg
+      arch: [x64, arm64]
+  icon: public/favicon.ico
+
+linux:
+  target:
+    - target: AppImage
+      arch: [x64]
+  icon: public/favicon.ico
