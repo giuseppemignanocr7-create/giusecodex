@@ -9,6 +9,12 @@ const app = express();
 app.use(cors());
 app.use(express.json({ limit: '10mb' }));
 
+// ──── Serve frontend static files (Electron packaged mode) ────
+const staticDir = process.env.STATIC_DIR;
+if (staticDir) {
+  app.use(express.static(staticDir));
+}
+
 // ──── File System API ────
 
 app.get('/api/files/tree', async (req, res) => {
@@ -320,6 +326,13 @@ app.get('/api/health', (_req, res) => {
     codeModel: codexAvailable ? 'gpt-5.3-codex (CLI)' : 'gpt-5.2-codex (API)',
   });
 });
+
+// ──── SPA catch-all (Electron packaged mode) ────
+if (staticDir) {
+  app.get('*', (_req, res) => {
+    res.sendFile(path.join(staticDir, 'index.html'));
+  });
+}
 
 // ──── Start ────
 

@@ -1,4 +1,4 @@
-import { app, BrowserWindow, shell } from 'electron';
+import { app, BrowserWindow, shell, session } from 'electron';
 import path from 'path';
 import { execSync, spawn, ChildProcess } from 'child_process';
 
@@ -19,17 +19,15 @@ function hasCodexCLI(): boolean {
 
 // ──── Start Express server ────
 function startServer(): void {
-  const serverEntry = isDev
-    ? path.join(__dirname, '..', 'server', 'index.ts')
-    : path.join(process.resourcesPath, 'server', 'index.ts');
-
   const env = {
     ...process.env,
     PORT: String(SERVER_PORT),
     CODEX_AVAILABLE: hasCodexCLI() ? '1' : '0',
+    STATIC_DIR: isDev ? '' : path.join(app.getAppPath(), 'dist'),
   };
 
   if (isDev) {
+    const serverEntry = path.join(__dirname, '..', 'server', 'index.ts');
     serverProcess = spawn('npx', ['tsx', serverEntry], {
       cwd: path.join(__dirname, '..'),
       env,
@@ -37,8 +35,10 @@ function startServer(): void {
       stdio: 'pipe',
     });
   } else {
-    serverProcess = spawn(process.execPath.replace('GiuseCoder.exe', 'resources/node.exe') || 'node', [serverEntry], {
-      cwd: path.join(process.resourcesPath),
+    // In packaged mode, use npx tsx from the system PATH
+    const serverEntry = path.join(process.resourcesPath, 'server', 'index.ts');
+    serverProcess = spawn('npx', ['tsx', serverEntry], {
+      cwd: process.resourcesPath,
       env,
       shell: true,
       stdio: 'pipe',
@@ -51,7 +51,7 @@ function startServer(): void {
 }
 
 // ──── Wait for server to be ready ────
-async function waitForServer(maxRetries = 30): Promise<boolean> {
+async function waitForServer(maxRetries = 40): Promise<boolean> {
   for (let i = 0; i < maxRetries; i++) {
     try {
       const res = await fetch(`http://localhost:${SERVER_PORT}/api/health`);
@@ -77,18 +77,32 @@ function createWindow(): void {
       preload: path.join(__dirname, 'preload.cjs'),
       nodeIntegration: false,
       contextIsolation: true,
+      webSecurity: true,
     },
   });
 
+  // Always load from Express server so API calls (/api/*) work correctly
+  mainWindow.loadURL(`http://localhost:${SERVER_PORT}`);
+
   if (isDev) {
-    mainWindow.loadURL(`http://localhost:5173`);
     mainWindow.webContents.openDevTools({ mode: 'detach' });
-  } else {
-    mainWindow.loadFile(path.join(__dirname, '..', 'dist', 'index.html'));
   }
 
-  // Open external links in browser
+  // Handle window.open: allow preview popups, external links in system browser
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+    if (url.startsWith('http://localhost') || url.startsWith('https://localhost')) {
+      // Allow preview popups to open as new Electron windows
+      return {
+        action: 'allow',
+        overrideBrowserWindowOptions: {
+          width: 800,
+          height: 900,
+          title: 'GiuseCoder Preview',
+          backgroundColor: '#ffffff',
+        },
+      };
+    }
+    // External URLs open in system browser
     shell.openExternal(url);
     return { action: 'deny' };
   });
@@ -101,12 +115,25 @@ function createWindow(): void {
 // ──── App lifecycle ────
 app.whenReady().then(async () => {
   console.log('[GiuseCoder] Starting...');
+  console.log('[GiuseCoder] Dev mode:', isDev);
   console.log('[GiuseCoder] Codex CLI:', hasCodexCLI() ? 'GPT 5.3 available' : 'Not found, using GPT 5.2-codex API');
+
+  // Allow CORS for API calls
+  session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
+    callback({
+      responseHeaders: {
+        ...details.responseHeaders,
+        'Access-Control-Allow-Origin': ['*'],
+      },
+    });
+  });
 
   startServer();
 
   const serverReady = await waitForServer();
-  if (!serverReady) {
+  if (serverReady) {
+    console.log('[GiuseCoder] Server ready on port', SERVER_PORT);
+  } else {
     console.error('[GiuseCoder] Server failed to start within timeout');
   }
 
