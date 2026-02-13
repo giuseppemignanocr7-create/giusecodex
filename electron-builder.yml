@@ -25,7 +25,11 @@ win:
   target:
     - target: nsis
       arch: [x64]
+    - target: dir
+      arch: [x64]
   icon: public/favicon.ico
+  signAndEditExecutable: false
+  forceCodeSigning: false
 
 nsis:
   oneClick: false
