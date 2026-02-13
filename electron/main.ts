@@ -19,7 +19,8 @@ function hasCodexCLI(): boolean {
 
 // ──── Start Express server ────
 function startServer(): void {
-  const distPath = isDev ? '' : path.join(app.getAppPath(), 'dist');
+  // In packaged mode, dist/ is unpacked outside asar at app.asar.unpacked/dist/
+  const distPath = isDev ? '' : path.join(app.getAppPath() + '.unpacked', 'dist');
   const env = {
     ...process.env,
     PORT: String(SERVER_PORT),
@@ -36,8 +37,8 @@ function startServer(): void {
       stdio: 'pipe',
     });
   } else {
-    // In packaged mode, run the pre-bundled server.cjs with Node.js
-    const serverBundle = path.join(app.getAppPath(), 'server', 'bundle.cjs');
+    // In packaged mode, run the pre-bundled server.cjs (unpacked from asar)
+    const serverBundle = path.join(app.getAppPath() + '.unpacked', 'server', 'bundle.cjs');
     const nodeExe = process.execPath; // Electron's node binary
     serverProcess = spawn(nodeExe, ['--no-warnings', serverBundle], {
       cwd: app.getAppPath(),
