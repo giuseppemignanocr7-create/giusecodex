@@ -1,30 +1,38 @@
-import type { VercelRequest, VercelResponse } from '@vercel/node';
-import Anthropic from '@anthropic-ai/sdk';
+export const config = { runtime: 'edge' };
 
-export default async function handler(req: VercelRequest, res: VercelResponse) {
-  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+export default async function handler(req: Request) {
+  if (req.method !== 'POST') {
+    return new Response(JSON.stringify({ error: 'Method not allowed' }), { status: 405 });
+  }
 
-  const { provider, apiKey } = req.body;
-  if (!apiKey) return res.json({ valid: false, error: 'No key provided' });
+  const { provider, apiKey } = await req.json();
+  if (!apiKey) return new Response(JSON.stringify({ valid: false, error: 'No key provided' }));
 
   try {
     if (provider === 'anthropic') {
-      const client = new Anthropic({ apiKey });
-      await client.messages.create({
-        model: 'claude-haiku-4-5-20251001',
-        max_tokens: 1,
-        messages: [{ role: 'user', content: 'hi' }],
+      const r = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-api-key': apiKey,
+          'anthropic-version': '2023-06-01',
+        },
+        body: JSON.stringify({
+          model: 'claude-haiku-4-5-20251001',
+          max_tokens: 1,
+          messages: [{ role: 'user', content: 'hi' }],
+        }),
       });
-      res.json({ valid: true });
+      return new Response(JSON.stringify({ valid: r.ok }));
     } else if (provider === 'openai') {
       const r = await fetch('https://api.openai.com/v1/models', {
         headers: { Authorization: `Bearer ${apiKey}` },
       });
-      res.json({ valid: r.ok });
+      return new Response(JSON.stringify({ valid: r.ok }));
     } else {
-      res.json({ valid: false, error: 'Unknown provider' });
+      return new Response(JSON.stringify({ valid: false, error: 'Unknown provider' }));
     }
   } catch (err: unknown) {
-    res.json({ valid: false, error: err instanceof Error ? err.message : 'Unknown error' });
+    return new Response(JSON.stringify({ valid: false, error: err instanceof Error ? err.message : 'Unknown error' }));
   }
 }

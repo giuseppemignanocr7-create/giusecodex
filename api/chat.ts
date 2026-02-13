@@ -1,21 +1,20 @@
-import type { VercelRequest, VercelResponse } from '@vercel/node';
-import Anthropic from '@anthropic-ai/sdk';
+export const config = { runtime: 'edge' };
 
-export default async function handler(req: VercelRequest, res: VercelResponse) {
-  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+export default async function handler(req: Request) {
+  if (req.method !== 'POST') {
+    return new Response(JSON.stringify({ error: 'Method not allowed' }), { status: 405 });
+  }
 
-  const { messages, model, apiKey, systemPrompt, provider } = req.body;
+  const { messages, model, apiKey, systemPrompt, provider } = await req.json();
 
-  if (!apiKey) return res.status(400).json({ error: 'API key required' });
+  if (!apiKey) {
+    return new Response(JSON.stringify({ error: 'API key required' }), { status: 400 });
+  }
 
   const system = systemPrompt || `You are GiuseCoder, a premium AI coding assistant.
 You write clean, idiomatic, production-ready code.
 When modifying code, output the complete changed code with file paths.
 Be concise and direct. Use markdown with code blocks.`;
-
-  res.setHeader('Content-Type', 'text/plain; charset=utf-8');
-  res.setHeader('Transfer-Encoding', 'chunked');
-  res.setHeader('Cache-Control', 'no-cache');
 
   try {
     if (provider === 'openai') {
@@ -32,57 +31,100 @@ Be concise and direct. Use markdown with code blocks.`;
 
       if (!openaiRes.ok) {
         const err = await openaiRes.text();
-        res.write(`**Error:** ${err}`);
-        return res.end();
+        return new Response(`**Error:** ${err}`, { status: 502 });
       }
 
-      const reader = openaiRes.body?.getReader();
-      const decoder = new TextDecoder();
-      let buffer = '';
+      // Pass through OpenAI SSE stream, extracting text deltas
+      const { readable, writable } = new TransformStream();
+      const writer = writable.getWriter();
+      const encoder = new TextEncoder();
 
-      if (reader) {
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          buffer += decoder.decode(value, { stream: true });
-          const lines = buffer.split('\n');
-          buffer = lines.pop() || '';
-          for (const line of lines) {
-            if (line.startsWith('data: ') && line !== 'data: [DONE]') {
-              try {
-                const json = JSON.parse(line.slice(6));
-                const text = json.choices?.[0]?.delta?.content;
-                if (text) res.write(text);
-              } catch { /* skip */ }
+      (async () => {
+        const reader = openaiRes.body!.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+        try {
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            buffer += decoder.decode(value, { stream: true });
+            const lines = buffer.split('\n');
+            buffer = lines.pop() || '';
+            for (const line of lines) {
+              if (line.startsWith('data: ') && line !== 'data: [DONE]') {
+                try {
+                  const json = JSON.parse(line.slice(6));
+                  const text = json.choices?.[0]?.delta?.content;
+                  if (text) await writer.write(encoder.encode(text));
+                } catch { /* skip */ }
+              }
             }
           }
-        }
-      }
-      res.end();
-    } else {
-      const client = new Anthropic({ apiKey });
-      const stream = client.messages.stream({
-        model: model || 'claude-opus-4-6',
-        max_tokens: 8192,
-        system,
-        messages,
+        } finally { await writer.close(); }
+      })();
+
+      return new Response(readable, {
+        headers: { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-cache' },
       });
 
-      for await (const event of stream) {
-        if (event.type === 'content_block_delta') {
-          const delta = event.delta;
-          if ('text' in delta) res.write(delta.text);
-        }
+    } else {
+      // Anthropic — use raw fetch streaming (no SDK needed in Edge)
+      const anthropicRes = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-api-key': apiKey,
+          'anthropic-version': '2023-06-01',
+        },
+        body: JSON.stringify({
+          model: model || 'claude-opus-4-6',
+          max_tokens: 8192,
+          system,
+          messages,
+          stream: true,
+        }),
+      });
+
+      if (!anthropicRes.ok) {
+        const err = await anthropicRes.text();
+        return new Response(`**Error:** ${err}`, { status: 502 });
       }
-      res.end();
+
+      const { readable, writable } = new TransformStream();
+      const writer = writable.getWriter();
+      const encoder = new TextEncoder();
+
+      (async () => {
+        const reader = anthropicRes.body!.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+        try {
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            buffer += decoder.decode(value, { stream: true });
+            const lines = buffer.split('\n');
+            buffer = lines.pop() || '';
+            for (const line of lines) {
+              if (line.startsWith('data: ')) {
+                try {
+                  const json = JSON.parse(line.slice(6));
+                  if (json.type === 'content_block_delta' && json.delta?.text) {
+                    await writer.write(encoder.encode(json.delta.text));
+                  }
+                } catch { /* skip */ }
+              }
+            }
+          }
+        } finally { await writer.close(); }
+      })();
+
+      return new Response(readable, {
+        headers: { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-cache' },
+      });
     }
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : 'Unknown error';
-    if (!res.headersSent) {
-      res.status(500).json({ error: msg });
-    } else {
-      res.write(`\n\n**Error:** ${msg}`);
-      res.end();
-    }
+    return new Response(JSON.stringify({ error: msg }), { status: 500 });
   }
 }
