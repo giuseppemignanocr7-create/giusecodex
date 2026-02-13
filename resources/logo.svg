@@ -1,0 +1,43 @@
+<svg width="64" height="64" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="gcLogoGradient" x1="8" y1="8" x2="56" y2="56" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#00D4FF"/>
+      <stop offset="1" stop-color="#E8EAF0"/>
+    </linearGradient>
+    <filter id="gcGlow" x="-20%" y="-20%" width="140%" height="140%" color-interpolation-filters="sRGB">
+      <feDropShadow dx="0" dy="0" stdDeviation="1.5" flood-color="#00D4FF" flood-opacity="0.4"/>
+    </filter>
+  </defs>
+
+  <rect x="8" y="8" width="48" height="48" rx="14" stroke="url(#gcLogoGradient)" stroke-width="1.5" opacity="0.35"/>
+
+  <path d="M32 14C24.163 14 18 20.163 18 28V36C18 43.837 24.163 50 32 50C39.837 50 46 43.837 46 36V28C46 20.163 39.837 14 32 14Z"
+        stroke="url(#gcLogoGradient)"
+        stroke-width="2"
+        stroke-linecap="round"
+        filter="url(#gcGlow)"/>
+
+  <path d="M32 14V50" stroke="url(#gcLogoGradient)" stroke-width="1.5" stroke-linecap="round" opacity="0.85"/>
+  <path d="M24 20L32 24L40 20" stroke="url(#gcLogoGradient)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M22 30H42" stroke="url(#gcLogoGradient)" stroke-width="1.5" stroke-linecap="round" opacity="0.85"/>
+  <path d="M24 40L32 36L40 40" stroke="url(#gcLogoGradient)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+
+  <circle cx="24" cy="20" r="2" fill="#00D4FF"/>
+  <circle cx="40" cy="20" r="2" fill="#00D4FF"/>
+  <circle cx="22" cy="30" r="2" fill="#00D4FF"/>
+  <circle cx="42" cy="30" r="2" fill="#00D4FF"/>
+  <circle cx="24" cy="40" r="2" fill="#00D4FF"/>
+  <circle cx="40" cy="40" r="2" fill="#00D4FF"/>
+  <circle cx="32" cy="24" r="1.8" fill="#E8EAF0"/>
+  <circle cx="32" cy="36" r="1.8" fill="#E8EAF0"/>
+
+  <style>
+    .gc-processing & {
+      animation: gc-pulse 1.5s ease-in-out infinite;
+    }
+    @keyframes gc-pulse {
+      0%, 100% { opacity: 0.8; transform: scale(1); }
+      50% { opacity: 1; transform: scale(1.035); }
+    }
+  </style>
+</svg>

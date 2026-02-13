@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; img-src {{cspSource}} data:; font-src {{cspSource}}; style-src {{cspSource}} 'unsafe-inline'; script-src 'nonce-{{nonce}}';"
+    />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="stylesheet" href="{{codiconUri}}" />
+    <link rel="stylesheet" href="{{stylesUri}}" />
+    <title>GiuseCoder</title>
+  </head>
+  <body>
+    <div class="gc-shell" id="gc-shell">
+      <header class="gc-header">
+        <button class="gc-logo" id="gc-logo-btn" type="button" aria-label="GiuseCoder Home">
+          <span class="gc-logo-icon" id="gc-logo-icon">
+            <img src="{{logoUri}}" alt="GiuseCoder logo" />
+          </span>
+          <span class="gc-logo-text">GiuseCoder</span>
+        </button>
+
+        <div class="gc-header-right">
+          <button class="gc-model-badge" id="gc-model-badge" type="button">MODEL</button>
+          <div class="gc-model-menu" id="gc-model-menu" hidden></div>
+          <button class="gc-header-btn" id="gc-toggle-context" type="button" title="Toggle context bar">
+            <i class="codicon codicon-fold"></i>
+          </button>
+          <button class="gc-header-btn" id="gc-clear-chat" type="button" title="Clear chat">
+            <i class="codicon codicon-trash"></i>
+          </button>
+          <button class="gc-header-btn" id="gc-open-settings" type="button" title="Settings">
+            <i class="codicon codicon-gear"></i>
+          </button>
+        </div>
+      </header>
+
+      <section class="gc-context-wrapper" id="gc-context-wrapper">
+        <div class="gc-context-bar" id="gc-context-bar"></div>
+      </section>
+
+      <main class="gc-messages" id="gc-messages" aria-live="polite"></main>
+
+      <section class="gc-settings" id="gc-settings" hidden>
+        <div class="gc-settings-scroll">
+          <div class="gc-settings-header">
+            <h2 class="gc-settings-title"><i class="codicon codicon-gear"></i> Settings</h2>
+            <button class="gc-header-btn" id="gc-close-settings" type="button" title="Close settings">
+              <i class="codicon codicon-close"></i>
+            </button>
+          </div>
+
+          <div class="gc-settings-section">
+            <h3 class="gc-settings-section-title"><i class="codicon codicon-key"></i> API Keys</h3>
+
+            <div class="gc-settings-field">
+              <label class="gc-settings-label" for="gc-key-anthropic">Anthropic API Key</label>
+              <div class="gc-settings-key-row">
+                <input type="password" id="gc-key-anthropic" class="gc-settings-input" placeholder="sk-ant-..." spellcheck="false" autocomplete="off" />
+                <button class="gc-settings-btn gc-settings-btn-save" id="gc-save-anthropic" type="button">Save</button>
+              </div>
+              <span class="gc-settings-status" id="gc-status-anthropic"></span>
+            </div>
+
+            <div class="gc-settings-field">
+              <label class="gc-settings-label" for="gc-key-openai">OpenAI API Key</label>
+              <div class="gc-settings-key-row">
+                <input type="password" id="gc-key-openai" class="gc-settings-input" placeholder="sk-proj-..." spellcheck="false" autocomplete="off" />
+                <button class="gc-settings-btn gc-settings-btn-save" id="gc-save-openai" type="button">Save</button>
+              </div>
+              <span class="gc-settings-status" id="gc-status-openai"></span>
+            </div>
+          </div>
+
+          <div class="gc-settings-section">
+            <h3 class="gc-settings-section-title"><i class="codicon codicon-symbol-misc"></i> Orchestrator</h3>
+
+            <div class="gc-settings-field">
+              <div class="gc-settings-toggle-row">
+                <label class="gc-settings-label" for="gc-orch-enabled">Multi-Agent Orchestration</label>
+                <input type="checkbox" id="gc-orch-enabled" class="gc-settings-checkbox" />
+              </div>
+              <span class="gc-settings-hint">Haiku triage → Opus plan → Sonnet + Codex → Opus review</span>
+            </div>
+
+            <div class="gc-settings-field">
+              <div class="gc-settings-toggle-row">
+                <label class="gc-settings-label" for="gc-orch-review">Auto Review</label>
+                <input type="checkbox" id="gc-orch-review" class="gc-settings-checkbox" />
+              </div>
+            </div>
+
+            <div class="gc-settings-field">
+              <div class="gc-settings-toggle-row">
+                <label class="gc-settings-label" for="gc-orch-fix">Auto Fix</label>
+                <input type="checkbox" id="gc-orch-fix" class="gc-settings-checkbox" />
+              </div>
+            </div>
+
+            <div class="gc-settings-field">
+              <div class="gc-settings-toggle-row">
+                <label class="gc-settings-label" for="gc-orch-parallel">Parallel Execution</label>
+                <input type="checkbox" id="gc-orch-parallel" class="gc-settings-checkbox" />
+              </div>
+            </div>
+          </div>
+
+          <div class="gc-settings-section">
+            <h3 class="gc-settings-section-title"><i class="codicon codicon-hubot"></i> Models</h3>
+
+            <div class="gc-settings-field">
+              <label class="gc-settings-label" for="gc-model-haiku">Haiku (Triage)</label>
+              <input type="text" id="gc-model-haiku" class="gc-settings-input" spellcheck="false" />
+            </div>
+            <div class="gc-settings-field">
+              <label class="gc-settings-label" for="gc-model-sonnet">Sonnet (Designer)</label>
+              <input type="text" id="gc-model-sonnet" class="gc-settings-input" spellcheck="false" />
+            </div>
+            <div class="gc-settings-field">
+              <label class="gc-settings-label" for="gc-model-opus">Opus (CTO)</label>
+              <input type="text" id="gc-model-opus" class="gc-settings-input" spellcheck="false" />
+            </div>
+            <div class="gc-settings-field">
+              <label class="gc-settings-label" for="gc-model-codex">Codex (Developer)</label>
+              <input type="text" id="gc-model-codex" class="gc-settings-input" spellcheck="false" />
+            </div>
+
+            <button class="gc-settings-btn gc-settings-btn-primary" id="gc-save-models" type="button">
+              <i class="codicon codicon-save"></i> Save Models
+            </button>
+          </div>
+        </div>
+      </section>
+
+      <section class="gc-quick-actions" id="gc-quick-actions">
+        <button class="gc-quick-action" data-action="/fix">Fix Errors</button>
+        <button class="gc-quick-action" data-action="/explain">Explain</button>
+        <button class="gc-quick-action" data-action="/refactor">Refactor</button>
+        <button class="gc-quick-action" data-action="/test">Tests</button>
+      </section>
+
+      <section class="gc-input-area">
+        <div class="gc-input-container" id="gc-input-container">
+          <div class="gc-input-tags" id="gc-input-tags"></div>
+
+          <textarea
+            id="gc-input-field"
+            class="gc-input-field"
+            rows="1"
+            placeholder="@file /command Ask GiuseCoder..."
+            spellcheck="false"
+          ></textarea>
+
+          <div class="gc-input-menu" id="gc-input-menu" hidden></div>
+
+          <div class="gc-input-toolbar">
+            <div class="gc-input-tools">
+              <button class="gc-input-tool-btn" id="gc-tool-attach" type="button" title="Add context">
+                <i class="codicon codicon-attach"></i>
+              </button>
+              <button class="gc-input-tool-btn" id="gc-tool-command" type="button" title="Slash commands">
+                <i class="codicon codicon-terminal-cmd"></i>
+              </button>
+              <button class="gc-input-tool-btn" id="gc-tool-stop" type="button" title="Stop generation">
+                <i class="codicon codicon-debug-stop"></i>
+              </button>
+            </div>
+
+            <button class="gc-send-btn" id="gc-send-btn" type="button">
+              <i class="codicon codicon-send"></i>
+              <span>Send</span>
+            </button>
+          </div>
+        </div>
+
+        <div class="gc-stats-bar">
+          <div class="gc-stat">
+            <span>Tokens:</span>
+            <span class="gc-stat-value" id="gc-stat-tokens">0</span>
+          </div>
+          <div class="gc-stat">
+            <span>Cost:</span>
+            <span class="gc-stat-value" id="gc-stat-cost">$0.0000</span>
+          </div>
+          <div class="gc-stat">
+            <span>Model:</span>
+            <span class="gc-stat-value" id="gc-stat-model">—</span>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <script nonce="{{nonce}}" src="{{markedUri}}"></script>
+    <script nonce="{{nonce}}" src="{{prismCoreUri}}"></script>
+    {{prismLanguageScripts}}
+    <script nonce="{{nonce}}" src="{{prismPrismaUri}}"></script>
+    <script nonce="{{nonce}}" src="{{markdownUri}}"></script>
+    <script nonce="{{nonce}}" src="{{welcomeUri}}"></script>
+    <script nonce="{{nonce}}" src="{{diffUri}}"></script>
+    <script nonce="{{nonce}}" src="{{toolCallUri}}"></script>
+    <script nonce="{{nonce}}" src="{{codeBlockUri}}"></script>
+    <script nonce="{{nonce}}" src="{{messagesUri}}"></script>
+    <script nonce="{{nonce}}" src="{{inputUri}}"></script>
+    <script nonce="{{nonce}}" src="{{settingsUri}}"></script>
+    <script nonce="{{nonce}}" src="{{appUri}}"></script>
+  </body>
+</html>
