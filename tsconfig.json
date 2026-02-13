@@ -13,6 +13,6 @@
     "isolatedModules": true,
     "noEmit": true
   },
-  "include": ["src", "server"],
-  "exclude": ["node_modules"]
+  "include": ["src/App.tsx", "src/main.tsx", "src/components", "src/stores", "src/vite-env.d.ts", "api"],
+  "exclude": ["node_modules", "src/extension.ts", "src/commands", "src/completion", "src/context", "src/orchestrator", "src/providers", "src/ui"]
 }
