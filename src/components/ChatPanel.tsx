@@ -1,7 +1,9 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useCallback } from 'react';
 import { useChat, ChatMessage, AgentRole } from '../stores/chatStore';
 import { useSettings } from '../stores/settingsStore';
-import { Send, Trash2, Zap, Bot, User, ChevronDown, Settings } from 'lucide-react';
+import { useProjects } from '../stores/projectStore';
+import { OrchestratorView, AgentStream } from './OrchestratorView';
+import { Send, Trash2, Zap, Bot, User, ChevronDown, FolderPlus, Folder, X } from 'lucide-react';
 
 const MODELS = [
   { id: 'claude-opus-4-6', label: 'Opus 4.6', desc: 'CTO reasoning', color: 'text-purple', provider: 'anthropic' },
@@ -30,16 +32,30 @@ const roleLabels: Record<AgentRole, string> = {
   system: 'System',
 };
 
+const defaultStream = (): AgentStream => ({ agent: 'opus', content: '', status: 'idle', label: '' });
+
 export function ChatPanel() {
   const { messages, isStreaming, currentModel, apiKey, totalCost, addMessage, setStreaming, setModel, setApiKey, appendToLast, clearMessages } = useChat();
+  const projects = useProjects();
   const [input, setInput] = useState('');
   const [showModelPicker, setShowModelPicker] = useState(false);
+  const [showProjectList, setShowProjectList] = useState(false);
+  const [newProjectName, setNewProjectName] = useState('');
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+
+  // Orchestrator split view state
+  const [orchActive, setOrchActive] = useState(false);
+  const [opusAnalysis, setOpusAnalysis] = useState<AgentStream>({ ...defaultStream(), agent: 'opus', label: 'Opus 4.6 — CTO Analysis' });
+  const [sonnetStream, setSonnetStream] = useState<AgentStream>({ ...defaultStream(), agent: 'sonnet', label: 'Sonnet 4 — UI/Design' });
+  const [codexStream, setCodexStream] = useState<AgentStream>({ ...defaultStream(), agent: 'codex', label: 'GPT 5.3 Codex — Code' });
+  const [opusReview, setOpusReview] = useState<AgentStream>({ ...defaultStream(), agent: 'opus', label: 'Opus 4.6 — Final Review' });
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
+
+  useEffect(() => { projects.loadProjects(); }, []);
 
   const selectedModel = MODELS.find(m => m.id === currentModel) || MODELS[1];
 
@@ -78,15 +94,12 @@ export function ChatPanel() {
   };
 
   const sendOrchestrated = async (chatHistory: Array<{role: string; content: string}>, settings: ReturnType<typeof useSettings.getState>) => {
-    // Show Opus as the initial responder
-    const opusMsg: ChatMessage = {
-      id: crypto.randomUUID(),
-      role: 'opus',
-      content: '',
-      timestamp: Date.now(),
-      model: 'Orchestrator',
-    };
-    addMessage(opusMsg);
+    // Activate split view and reset streams
+    setOrchActive(true);
+    setOpusAnalysis({ agent: 'opus', content: '', status: 'running', label: 'Opus 4.6 — CTO Analysis' });
+    setSonnetStream({ agent: 'sonnet', content: '', status: 'idle', label: 'Sonnet 4 — UI/Design' });
+    setCodexStream({ agent: 'codex', content: '', status: 'idle', label: 'GPT 5.3 Codex — Code' });
+    setOpusReview({ agent: 'opus', content: '', status: 'idle', label: 'Opus 4.6 — Final Review' });
 
     try {
       const res = await fetch('/api/chat/orchestrate', {
@@ -102,7 +115,6 @@ export function ChatPanel() {
       const reader = res.body?.getReader();
       const decoder = new TextDecoder();
       let buffer = '';
-      let currentAgent = 'opus';
 
       if (reader) {
         while (true) {
@@ -118,41 +130,45 @@ export function ChatPanel() {
               const event = JSON.parse(line.slice(6));
 
               if (event.type === 'step') {
-                // When a new agent starts, add a new message for it
-                if (event.status === 'running' && event.agent !== currentAgent) {
-                  currentAgent = event.agent;
-                  const agentMsg: ChatMessage = {
-                    id: crypto.randomUUID(),
-                    role: event.agent as AgentRole,
-                    content: `*${event.label}*\n\n`,
-                    timestamp: Date.now(),
-                    model: event.agent === 'opus' ? 'claude-opus-4-6' : event.agent === 'sonnet' ? 'claude-sonnet-4' : 'gpt-5.3-codex',
-                  };
-                  addMessage(agentMsg);
-                } else if (event.status === 'done' && event.agent === currentAgent) {
-                  appendToLast('\n\n---\n');
+                const update = { status: event.status as AgentStream['status'], label: event.label };
+                if (event.agent === 'opus' && event.label.includes('Review')) {
+                  setOpusReview(prev => ({ ...prev, ...update }));
+                } else if (event.agent === 'opus') {
+                  setOpusAnalysis(prev => ({ ...prev, ...update }));
+                } else if (event.agent === 'sonnet') {
+                  setSonnetStream(prev => ({ ...prev, ...update }));
+                } else if (event.agent === 'codex') {
+                  setCodexStream(prev => ({ ...prev, ...update }));
                 }
               } else if (event.type === 'token') {
-                appendToLast(event.text);
+                // Route tokens to the correct agent panel
+                if (event.agent === 'sonnet') {
+                  setSonnetStream(prev => ({ ...prev, content: prev.content + event.text }));
+                } else if (event.agent === 'codex') {
+                  setCodexStream(prev => ({ ...prev, content: prev.content + event.text }));
+                } else if (event.agent === 'opus') {
+                  // Check if we're in review phase
+                  setOpusReview(prev => {
+                    if (prev.status === 'running') return { ...prev, content: prev.content + event.text };
+                    return prev;
+                  });
+                  setOpusAnalysis(prev => {
+                    if (prev.status === 'running') return { ...prev, content: prev.content + event.text };
+                    return prev;
+                  });
+                }
               } else if (event.type === 'done') {
-                // Final combined response from Opus
-                const finalMsg: ChatMessage = {
-                  id: crypto.randomUUID(),
-                  role: 'opus',
-                  content: event.content,
-                  timestamp: Date.now(),
-                  model: 'claude-opus-4-6 (final)',
-                };
-                addMessage(finalMsg);
+                // Save to project
+                projects.save();
               } else if (event.type === 'error') {
-                appendToLast(`\n\n**Error:** ${event.message}`);
+                setOpusReview(prev => ({ ...prev, content: prev.content + `\n\n**Error:** ${event.message}`, status: 'error' }));
               }
             } catch { /* skip malformed */ }
           }
         }
       }
     } catch (err: unknown) {
-      appendToLast(`\n\n**Error:** ${err instanceof Error ? err.message : 'Unknown error'}`);
+      setOpusReview(prev => ({ ...prev, content: `**Error:** ${err instanceof Error ? err.message : 'Unknown error'}`, status: 'error' }));
     }
   };
 
@@ -218,6 +234,13 @@ export function ChatPanel() {
     }
   };
 
+  const createProject = () => {
+    const name = newProjectName.trim() || `Project ${projects.projects.length + 1}`;
+    projects.createProject(name);
+    setNewProjectName('');
+    setShowProjectList(false);
+  };
+
   return (
     <div className="h-full flex flex-col bg-surface">
       {/* Header */}
@@ -227,36 +250,95 @@ export function ChatPanel() {
           <span className="text-xs font-semibold text-muted uppercase tracking-wider">AI Chat</span>
         </div>
         <div className="flex items-center gap-2">
+          {/* Project selector */}
+          <div className="relative">
+            <button
+              onClick={() => setShowProjectList(!showProjectList)}
+              className="flex items-center gap-1 text-[10px] px-2 py-1 rounded bg-overlay text-muted hover:text-text transition-colors"
+              title="Projects"
+            >
+              <Folder className="w-3 h-3" />
+              <span className="max-w-[80px] truncate">{projects.activeProject?.name || 'No project'}</span>
+            </button>
+            {showProjectList && (
+              <div className="absolute right-0 top-full mt-1 w-52 bg-overlay border border-base rounded shadow-lg py-1 z-20">
+                <div className="px-2 py-1 flex gap-1">
+                  <input
+                    value={newProjectName}
+                    onChange={e => setNewProjectName(e.target.value)}
+                    onKeyDown={e => e.key === 'Enter' && createProject()}
+                    placeholder="New project name..."
+                    className="flex-1 bg-surface border border-base rounded px-2 py-1 text-[10px] text-text placeholder:text-muted/50 focus:outline-none"
+                  />
+                  <button onClick={createProject} className="p-1 text-accent hover:bg-surface rounded" title="Create">
+                    <FolderPlus className="w-3 h-3" />
+                  </button>
+                </div>
+                <div className="border-t border-base my-1" />
+                {projects.projects.length === 0 && (
+                  <div className="px-3 py-2 text-[10px] text-muted">No projects yet</div>
+                )}
+                {projects.projects.slice().sort((a, b) => b.updatedAt - a.updatedAt).map(p => (
+                  <button
+                    key={p.id}
+                    onClick={() => { projects.setActiveProject(p.id); setShowProjectList(false); }}
+                    className={`flex items-center gap-2 px-3 py-1.5 text-xs w-full hover:bg-surface transition-colors ${
+                      p.id === projects.activeProjectId ? 'text-accent' : 'text-text'
+                    }`}
+                  >
+                    <Folder className="w-3 h-3 shrink-0" />
+                    <span className="truncate">{p.name}</span>
+                    <span className="text-[9px] text-muted ml-auto shrink-0">{new Date(p.updatedAt).toLocaleDateString()}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
           <span className="text-[10px] text-muted">${totalCost.toFixed(4)}</span>
-          <button onClick={clearMessages} className="p-1 text-muted hover:text-red rounded hover:bg-overlay" title="Clear">
+          {orchActive && (
+            <button onClick={() => setOrchActive(false)} className="p-1 text-muted hover:text-accent rounded hover:bg-overlay" title="Back to chat">
+              <X className="w-3.5 h-3.5" />
+            </button>
+          )}
+          <button onClick={() => { clearMessages(); setOrchActive(false); }} className="p-1 text-muted hover:text-red rounded hover:bg-overlay" title="Clear">
             <Trash2 className="w-3.5 h-3.5" />
           </button>
         </div>
       </div>
 
-      {/* Messages */}
-      <div className="flex-1 overflow-y-auto px-3 py-2 space-y-3">
-        {messages.length === 0 && (
-          <div className="text-center py-12">
-            <Zap className="w-10 h-10 text-accent/20 mx-auto mb-3" />
-            <p className="text-muted text-sm">Ask GiuseCoder anything</p>
-            <p className="text-muted/50 text-xs mt-1">Powered by Claude AI</p>
-          </div>
-        )}
-        {messages.map(msg => (
-          <div key={msg.id} className={`border-l-2 ${roleColors[msg.role]} pl-3 py-1`}>
-            <div className="flex items-center gap-1.5 mb-1">
-              {msg.role === 'user' ? <User className="w-3 h-3 text-yellow" /> : <Bot className="w-3 h-3 text-accent" />}
-              <span className="text-[10px] font-semibold text-muted">{roleLabels[msg.role]}</span>
-              {msg.model && <span className="text-[9px] text-muted/50">{msg.model}</span>}
+      {/* Content: Split Orchestrator View or regular messages */}
+      {orchActive ? (
+        <OrchestratorView
+          opusAnalysis={opusAnalysis}
+          sonnetStream={sonnetStream}
+          codexStream={codexStream}
+          opusReview={opusReview}
+          isRunning={isStreaming}
+        />
+      ) : (
+        <div className="flex-1 overflow-y-auto px-3 py-2 space-y-3">
+          {messages.length === 0 && (
+            <div className="text-center py-12">
+              <Zap className="w-10 h-10 text-accent/20 mx-auto mb-3" />
+              <p className="text-muted text-sm">Ask GiuseCoder anything</p>
+              <p className="text-muted/50 text-xs mt-1">Opus orchestrates • Sonnet designs • Codex codes</p>
             </div>
-            <div className="text-xs text-text/90 whitespace-pre-wrap break-words leading-relaxed">
-              {msg.content || (isStreaming && msg === messages[messages.length - 1] ? <span className="animate-pulse text-accent">...</span> : '')}
+          )}
+          {messages.map(msg => (
+            <div key={msg.id} className={`border-l-2 ${roleColors[msg.role]} pl-3 py-1`}>
+              <div className="flex items-center gap-1.5 mb-1">
+                {msg.role === 'user' ? <User className="w-3 h-3 text-yellow" /> : <Bot className="w-3 h-3 text-accent" />}
+                <span className="text-[10px] font-semibold text-muted">{roleLabels[msg.role]}</span>
+                {msg.model && <span className="text-[9px] text-muted/50">{msg.model}</span>}
+              </div>
+              <div className="text-xs text-text/90 whitespace-pre-wrap break-words leading-relaxed">
+                {msg.content || (isStreaming && msg === messages[messages.length - 1] ? <span className="animate-pulse text-accent">...</span> : '')}
+              </div>
             </div>
-          </div>
-        ))}
-        <div ref={messagesEndRef} />
-      </div>
+          ))}
+          <div ref={messagesEndRef} />
+        </div>
+      )}
 
       {/* Model picker + Input */}
       <div className="border-t border-base p-2 shrink-0">
