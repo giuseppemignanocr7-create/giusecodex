@@ -4,10 +4,12 @@ import { useSettings } from '../stores/settingsStore';
 import { Send, Trash2, Zap, Bot, User, ChevronDown, Settings } from 'lucide-react';
 
 const MODELS = [
-  { id: 'claude-opus-4-6', label: 'Opus 4.6', desc: 'Most powerful', color: 'text-purple' },
-  { id: 'claude-sonnet-4-20250514', label: 'Sonnet 4', desc: 'Balanced', color: 'text-accent' },
-  { id: 'claude-haiku-4-5-20251001', label: 'Haiku 4.5', desc: 'Fast', color: 'text-green' },
-  { id: 'gpt-5.3-codex', label: 'GPT 5.3 Codex', desc: 'OpenAI code gen', color: 'text-yellow' },
+  { id: 'claude-opus-4-6', label: 'Opus 4.6', desc: 'CTO reasoning', color: 'text-purple', provider: 'anthropic' },
+  { id: 'claude-sonnet-4-20250514', label: 'Sonnet 4', desc: 'Balanced', color: 'text-accent', provider: 'anthropic' },
+  { id: 'claude-haiku-4-5-20251001', label: 'Haiku 4.5', desc: 'Fast', color: 'text-green', provider: 'anthropic' },
+  { id: 'gpt-5.3-codex', label: 'GPT 5.3 Codex', desc: 'ChatGPT auth', color: 'text-yellow', provider: 'codex-cli' },
+  { id: 'gpt-5.2', label: 'GPT 5.2', desc: 'OpenAI API', color: 'text-yellow', provider: 'openai' },
+  { id: 'o3', label: 'o3', desc: 'Reasoning', color: 'text-yellow', provider: 'openai' },
 ];
 
 const roleColors: Record<AgentRole, string> = {
@@ -155,8 +157,9 @@ export function ChatPanel() {
   };
 
   const sendDirect = async (chatHistory: Array<{role: string; content: string}>, settings: ReturnType<typeof useSettings.getState>) => {
-    const isGpt = currentModel.startsWith('gpt');
-    const assistantRole: AgentRole = isGpt ? 'codex' : currentModel.includes('haiku') ? 'haiku' : currentModel.includes('opus') ? 'opus' : 'sonnet';
+    const modelInfo = MODELS.find(m => m.id === currentModel);
+    const provider = modelInfo?.provider || 'anthropic';
+    const assistantRole: AgentRole = provider === 'codex-cli' || provider === 'openai' ? 'codex' : currentModel.includes('haiku') ? 'haiku' : currentModel.includes('opus') ? 'opus' : 'sonnet';
     const assistantMsg: ChatMessage = {
       id: crypto.randomUUID(),
       role: assistantRole,
@@ -167,16 +170,30 @@ export function ChatPanel() {
     addMessage(assistantMsg);
 
     try {
-      const res = await fetch('/api/chat', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          messages: chatHistory,
-          model: currentModel,
-          apiKey: isGpt ? settings.openaiKey : apiKey,
-          provider: isGpt ? 'openai' : 'anthropic',
-        }),
-      });
+      let res: Response;
+
+      if (provider === 'codex-cli') {
+        // GPT 5.3 Codex — via Codex CLI on local server
+        res = await fetch('/api/chat/codex', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            prompt: chatHistory[chatHistory.length - 1]?.content || '',
+            model: currentModel,
+          }),
+        });
+      } else {
+        res = await fetch('/api/chat', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            messages: chatHistory,
+            model: currentModel,
+            apiKey: provider === 'openai' ? settings.openaiKey : apiKey,
+            provider,
+          }),
+        });
+      }
 
       const reader = res.body?.getReader();
       const decoder = new TextDecoder();

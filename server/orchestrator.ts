@@ -117,9 +117,9 @@ export async function orchestrate(
 
   if (plan.needsCode) {
     tasks.push((async () => {
-      config.onStep({ agent: 'codex', label: 'GPT 5.3 writing code...', status: 'running' });
-      results.code = await callOpenAI(config.openaiKey, 'gpt-5.3-codex', CODEX_SYSTEM, [...messages, { role: 'user', content: plan.codePrompt }], config);
-      config.onStep({ agent: 'codex', label: 'GPT 5.3 code complete', status: 'done', content: results.code });
+      config.onStep({ agent: 'codex', label: 'GPT 5.3 Codex writing code...', status: 'running' });
+      results.code = await callCodexCLI(plan.codePrompt, config);
+      config.onStep({ agent: 'codex', label: 'GPT 5.3 Codex complete', status: 'done', content: results.code });
     })());
   }
 
@@ -185,60 +185,42 @@ async function callAnthropic(
   return result;
 }
 
-async function callOpenAI(
-  apiKey: string,
-  model: string,
-  system: string,
-  messages: Array<{ role: string; content: string }>,
+async function callCodexCLI(
+  prompt: string,
   config: OrchestratorConfig
 ): Promise<string> {
-  const res = await fetch('https://api.openai.com/v1/chat/completions', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${apiKey}`,
-    },
-    body: JSON.stringify({
-      model,
-      messages: [
-        { role: 'system', content: system },
-        ...messages,
-      ],
-      max_tokens: 8192,
-      stream: true,
-    }),
-  });
+  const { spawn } = await import('child_process');
 
-  if (!res.ok) {
-    const err = await res.text();
-    throw new Error(`OpenAI error: ${err}`);
-  }
+  return new Promise((resolve, reject) => {
+    let result = '';
+    const codex = spawn('codex', [
+      'exec',
+      '-m', 'gpt-5.3-codex',
+      prompt,
+    ], { shell: true, cwd: process.cwd() });
 
-  let result = '';
-  const reader = res.body?.getReader();
-  const decoder = new TextDecoder();
-  let buffer = '';
+    codex.stdout.on('data', (data: Buffer) => {
+      const text = data.toString();
+      result += text;
+      config.onToken('codex', text);
+    });
 
-  if (reader) {
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      buffer += decoder.decode(value, { stream: true });
-      const lines = buffer.split('\n');
-      buffer = lines.pop() || '';
-      for (const line of lines) {
-        if (line.startsWith('data: ') && line !== 'data: [DONE]') {
-          try {
-            const json = JSON.parse(line.slice(6));
-            const text = json.choices?.[0]?.delta?.content;
-            if (text) {
-              result += text;
-              config.onToken('codex', text);
-            }
-          } catch { /* skip */ }
-        }
+    codex.stderr.on('data', (data: Buffer) => {
+      const text = data.toString();
+      result += text;
+      config.onToken('codex', text);
+    });
+
+    codex.on('close', (code: number | null) => {
+      if (code === 0 || result.length > 0) {
+        resolve(result);
+      } else {
+        reject(new Error(`Codex CLI exited with code ${code}`));
       }
-    }
-  }
-  return result;
+    });
+
+    codex.on('error', (err: Error) => {
+      reject(new Error(`Codex CLI error: ${err.message}`));
+    });
+  });
 }

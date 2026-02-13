@@ -227,6 +227,49 @@ Be concise and direct. Use markdown with code blocks.`;
   }
 });
 
+// ──── Codex CLI Chat (GPT 5.3 via ChatGPT auth) ────
+
+app.post('/api/chat/codex', async (req, res) => {
+  const { prompt, model } = req.body;
+
+  if (!prompt) return res.status(400).json({ error: 'Prompt required' });
+
+  res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+  res.setHeader('Transfer-Encoding', 'chunked');
+  res.setHeader('Cache-Control', 'no-cache');
+
+  const { spawn } = await import('child_process');
+  const codex = spawn('codex', [
+    'exec',
+    '-m', model || 'gpt-5.3-codex',
+    prompt,
+  ], {
+    cwd: process.cwd(),
+    shell: true,
+  });
+
+  codex.stdout.on('data', (data: Buffer) => {
+    res.write(data.toString());
+  });
+
+  codex.stderr.on('data', (data: Buffer) => {
+    res.write(data.toString());
+  });
+
+  codex.on('close', () => {
+    res.end();
+  });
+
+  codex.on('error', (err: Error) => {
+    if (!res.headersSent) {
+      res.status(500).json({ error: err.message });
+    } else {
+      res.write(`\n\n**Error:** ${err.message}`);
+      res.end();
+    }
+  });
+});
+
 // ──── Orchestrated Chat (Opus → Sonnet + Codex → Opus review) ────
 
 app.post('/api/chat/orchestrate', async (req, res) => {
