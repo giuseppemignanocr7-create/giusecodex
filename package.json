@@ -1,243 +1,44 @@
 {
-  "name": "giusecoder",
-  "displayName": "GiuseCoder",
-  "description": "Luxury technical AI coding copilot for VS Code with premium chat UX and inline tab completion.",
+  "name": "giusecoder-ide",
   "version": "0.1.0",
-  "publisher": "global-consulting-srls",
-  "license": "MIT",
-  "engines": {
-    "vscode": "^1.93.0"
-  },
-  "categories": [
-    "AI",
-    "Other"
-  ],
-  "main": "./out/extension.js",
-  "contributes": {
-    "viewsContainers": {
-      "activitybar": [
-        {
-          "id": "giuseCoder",
-          "title": "GiuseCoder",
-          "icon": "resources/logo.svg"
-        }
-      ]
-    },
-    "views": {
-      "giuseCoder": [
-        {
-          "id": "giuseCoder.chatView",
-          "name": "GiuseCoder",
-          "icon": "resources/logo.svg"
-        }
-      ]
-    },
-    "commands": [
-      {
-        "command": "giuseCoder.openChat",
-        "title": "GiuseCoder: Focus Chat"
-      },
-      {
-        "command": "giuseCoder.clearChat",
-        "title": "GiuseCoder: Clear Chat"
-      },
-      {
-        "command": "giuseCoder.toggleTabCompletion",
-        "title": "GiuseCoder: Toggle Tab Completion"
-      },
-      {
-        "command": "giuseCoder.setAnthropicApiKey",
-        "title": "GiuseCoder: Set Anthropic API Key"
-      },
-      {
-        "command": "giuseCoder.setOpenaiApiKey",
-        "title": "GiuseCoder: Set OpenAI API Key"
-      },
-      {
-        "command": "giuseCoder.inlineEdit",
-        "title": "GiuseCoder: Inline Edit Selection"
-      },
-      {
-        "command": "giuseCoder.fixErrors",
-        "title": "GiuseCoder: Fix Errors"
-      },
-      {
-        "command": "giuseCoder.explainSelection",
-        "title": "GiuseCoder: Explain Selection"
-      },
-      {
-        "command": "giuseCoder.refactorSelection",
-        "title": "GiuseCoder: Refactor Selection"
-      },
-      {
-        "command": "giuseCoder.generateTests",
-        "title": "GiuseCoder: Generate Tests"
-      }
-    ],
-    "configuration": {
-      "title": "GiuseCoder",
-      "properties": {
-        "giuseCoder.chat.model": {
-          "type": "string",
-          "default": "claude-sonnet-4-20250514",
-          "description": "Default model used for chat responses"
-        },
-        "giuseCoder.chat.maxOutputTokens": {
-          "type": "number",
-          "default": 4096,
-          "minimum": 256,
-          "maximum": 16384,
-          "description": "Maximum output tokens for each chat response"
-        },
-        "giuseCoder.chat.temperature": {
-          "type": "number",
-          "default": 0.2,
-          "minimum": 0,
-          "maximum": 1,
-          "description": "Sampling temperature for chat responses"
-        },
-        "giuseCoder.chat.baseUrl": {
-          "type": "string",
-          "default": "https://api.anthropic.com",
-          "description": "Anthropic API base URL"
-        },
-        "giuseCoder.tabCompletion.enabled": {
-          "type": "boolean",
-          "default": true,
-          "description": "Enable AI-powered tab completion"
-        },
-        "giuseCoder.tabCompletion.model": {
-          "type": "string",
-          "default": "claude-haiku-4-5-20251001",
-          "description": "Model for tab completion (use fastest available)"
-        },
-        "giuseCoder.tabCompletion.debounceMs": {
-          "type": "number",
-          "default": 300,
-          "description": "Debounce delay in ms before triggering completion"
-        },
-        "giuseCoder.tabCompletion.maxLines": {
-          "type": "number",
-          "default": 8,
-          "minimum": 1,
-          "maximum": 20,
-          "description": "Maximum lines to suggest in a single completion"
-        },
-        "giuseCoder.tabCompletion.maxContextLines": {
-          "type": "number",
-          "default": 50,
-          "minimum": 10,
-          "maximum": 200,
-          "description": "Maximum context lines before/after cursor for tab completion"
-        },
-        "giuseCoder.orchestrator.enabled": {
-          "type": "boolean",
-          "default": true,
-          "description": "Enable multi-agent orchestration (Haiku triage → Opus plan → Sonnet design + Codex code → Opus review)"
-        },
-        "giuseCoder.orchestrator.autoReview": {
-          "type": "boolean",
-          "default": true,
-          "description": "Automatically run Opus review after code generation"
-        },
-        "giuseCoder.orchestrator.autoFix": {
-          "type": "boolean",
-          "default": true,
-          "description": "Automatically re-run code generation to fix critical/high review issues"
-        },
-        "giuseCoder.orchestrator.parallelExecution": {
-          "type": "boolean",
-          "default": true,
-          "description": "Run design and code steps in parallel when the plan allows it"
-        },
-        "giuseCoder.orchestrator.costWarningThreshold": {
-          "type": "number",
-          "default": 0.5,
-          "minimum": 0,
-          "description": "Show a warning before executing tasks estimated to exceed this cost (USD)"
-        },
-        "giuseCoder.orchestrator.defaultMode": {
-          "type": "string",
-          "default": "orchestrated",
-          "enum": [
-            "orchestrated",
-            "single"
-          ],
-          "description": "Default mode: orchestrated (multi-agent) or single (direct model call)"
-        },
-        "giuseCoder.orchestrator.codexReasoningEffort": {
-          "type": "string",
-          "default": "high",
-          "enum": [
-            "low",
-            "medium",
-            "high"
-          ],
-          "description": "Reasoning effort level for Codex model"
-        },
-        "giuseCoder.orchestrator.maxFixRounds": {
-          "type": "number",
-          "default": 1,
-          "minimum": 0,
-          "maximum": 3,
-          "description": "Maximum number of auto-fix rounds after review"
-        },
-        "giuseCoder.orchestrator.models.haiku": {
-          "type": "string",
-          "default": "claude-haiku-4-5-20251001",
-          "description": "Model for Haiku triage agent"
-        },
-        "giuseCoder.orchestrator.models.sonnet": {
-          "type": "string",
-          "default": "claude-sonnet-4-20250514",
-          "description": "Model for Sonnet designer agent"
-        },
-        "giuseCoder.orchestrator.models.opus": {
-          "type": "string",
-          "default": "claude-opus-4-6",
-          "description": "Model for Opus CTO/reviewer agent"
-        },
-        "giuseCoder.orchestrator.models.codex": {
-          "type": "string",
-          "default": "gpt-5.3-codex",
-          "description": "Model for Codex developer agent"
-        },
-        "giuseCoder.openai.baseUrl": {
-          "type": "string",
-          "default": "https://api.openai.com/v1",
-          "description": "OpenAI API base URL"
-        }
-      }
-    },
-    "keybindings": [
-      {
-        "command": "giuseCoder.inlineEdit",
-        "key": "ctrl+k",
-        "when": "editorTextFocus"
-      },
-      {
-        "command": "giuseCoder.clearChat",
-        "key": "ctrl+l",
-        "when": "view == giuseCoder.chatView"
-      }
-    ]
-  },
+  "private": true,
+  "type": "module",
   "scripts": {
-    "compile": "tsc -p ./",
-    "watch": "tsc -watch -p ./",
-    "vscode:prepublish": "npm run compile"
+    "dev": "concurrently \"npm run dev:server\" \"npm run dev:client\"",
+    "dev:client": "vite",
+    "dev:server": "tsx watch server/index.ts",
+    "build": "tsc -b && vite build",
+    "preview": "vite preview"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.38.0",
-    "@vscode/codicons": "^0.0.44",
-    "marked": "^14.1.2",
-    "openai": "^4.104.0",
-    "prismjs": "^1.30.0"
+    "@monaco-editor/react": "^4.7.0",
+    "@xterm/addon-fit": "^0.10.0",
+    "@xterm/xterm": "^5.5.0",
+    "cors": "^2.8.5",
+    "express": "^4.21.0",
+    "lucide-react": "^0.468.0",
+    "monaco-editor": "^0.52.0",
+    "node-pty": "^1.0.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "react-resizable-panels": "^2.1.0",
+    "zustand": "^5.0.0"
   },
   "devDependencies": {
+    "@types/cors": "^2.8.17",
+    "@types/express": "^5.0.0",
     "@types/node": "^22.10.1",
-    "@types/prismjs": "^1.26.5",
-    "@types/vscode": "^1.93.0",
-    "typescript": "^5.7.2"
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "@vercel/node": "^5.6.3",
+    "@vitejs/plugin-react": "^4.3.0",
+    "autoprefixer": "^10.4.20",
+    "concurrently": "^9.1.0",
+    "postcss": "^8.5.0",
+    "tailwindcss": "^3.4.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.7.2",
+    "vite": "^6.0.0"
   }
 }
