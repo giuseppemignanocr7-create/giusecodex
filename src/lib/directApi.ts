@@ -1,0 +1,157 @@
+// Direct API calls for Electron mode (no server needed)
+// When loaded from file://, we call Anthropic/OpenAI APIs directly
+
+export const isElectronApp = typeof window !== 'undefined' && window.location.protocol === 'file:';
+
+// ──── Anthropic Streaming ────
+export async function streamAnthropic(params: {
+  messages: Array<{ role: string; content: string }>;
+  model: string;
+  apiKey: string;
+  signal?: AbortSignal;
+  onToken: (text: string) => void;
+}): Promise<void> {
+  const res = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-api-key': params.apiKey,
+      'anthropic-version': '2023-06-01',
+      'anthropic-dangerous-direct-browser-access': 'true',
+    },
+    body: JSON.stringify({
+      model: params.model,
+      max_tokens: 8192,
+      stream: true,
+      messages: params.messages.map(m => ({
+        role: m.role === 'user' ? 'user' : 'assistant',
+        content: m.content,
+      })),
+    }),
+    signal: params.signal,
+  });
+
+  if (!res.ok) {
+    const err = await res.text();
+    throw new Error(`Anthropic API ${res.status}: ${err.slice(0, 200)}`);
+  }
+
+  const reader = res.body?.getReader();
+  if (!reader) throw new Error('No response body');
+  const decoder = new TextDecoder();
+  let buffer = '';
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split('\n');
+    buffer = lines.pop() || '';
+
+    for (const line of lines) {
+      if (!line.startsWith('data: ')) continue;
+      const data = line.slice(6).trim();
+      if (data === '[DONE]') return;
+      try {
+        const parsed = JSON.parse(data);
+        if (parsed.type === 'content_block_delta' && parsed.delta?.text) {
+          params.onToken(parsed.delta.text);
+        }
+      } catch { /* skip malformed */ }
+    }
+  }
+}
+
+// ──── OpenAI Streaming ────
+export async function streamOpenAI(params: {
+  messages: Array<{ role: string; content: string }>;
+  model: string;
+  apiKey: string;
+  signal?: AbortSignal;
+  onToken: (text: string) => void;
+}): Promise<void> {
+  const res = await fetch('https://api.openai.com/v1/chat/completions', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${params.apiKey}`,
+    },
+    body: JSON.stringify({
+      model: params.model,
+      stream: true,
+      messages: params.messages.map(m => ({
+        role: m.role === 'user' ? 'user' : 'assistant',
+        content: m.content,
+      })),
+    }),
+    signal: params.signal,
+  });
+
+  if (!res.ok) {
+    const err = await res.text();
+    throw new Error(`OpenAI API ${res.status}: ${err.slice(0, 200)}`);
+  }
+
+  const reader = res.body?.getReader();
+  if (!reader) throw new Error('No response body');
+  const decoder = new TextDecoder();
+  let buffer = '';
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split('\n');
+    buffer = lines.pop() || '';
+
+    for (const line of lines) {
+      if (!line.startsWith('data: ')) continue;
+      const data = line.slice(6).trim();
+      if (data === '[DONE]') return;
+      try {
+        const parsed = JSON.parse(data);
+        const content = parsed.choices?.[0]?.delta?.content;
+        if (content) params.onToken(content);
+      } catch { /* skip malformed */ }
+    }
+  }
+}
+
+// ──── Server-proxied streaming (web mode) ────
+export async function streamViaServer(params: {
+  messages: Array<{ role: string; content: string }>;
+  model: string;
+  apiKey: string;
+  provider: string;
+  openaiKey?: string;
+  signal?: AbortSignal;
+  onToken: (text: string) => void;
+}): Promise<void> {
+  const res = await fetch('/api/chat', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      messages: params.messages,
+      model: params.model,
+      apiKey: params.provider === 'openai' ? params.openaiKey : params.apiKey,
+      provider: params.provider,
+    }),
+    signal: params.signal,
+  });
+
+  if (!res.ok) {
+    const err = await res.text();
+    throw new Error(`Server error ${res.status}: ${err.slice(0, 200)}`);
+  }
+
+  const reader = res.body?.getReader();
+  if (!reader) throw new Error('No response body');
+  const decoder = new TextDecoder();
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    const text = decoder.decode(value, { stream: true });
+    params.onToken(text);
+  }
+}

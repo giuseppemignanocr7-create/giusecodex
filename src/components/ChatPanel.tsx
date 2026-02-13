@@ -3,7 +3,8 @@ import { useChat, ChatMessage, AgentRole } from '../stores/chatStore';
 import { useSettings } from '../stores/settingsStore';
 import { useProjects } from '../stores/projectStore';
 import { OrchestratorView, AgentStream } from './OrchestratorView';
-import { Send, Trash2, Zap, Bot, User, ChevronDown, FolderPlus, Folder, X } from 'lucide-react';
+import { Send, Trash2, Zap, Bot, User, ChevronDown, FolderPlus, Folder, X, StopCircle } from 'lucide-react';
+import { isElectronApp, streamAnthropic, streamOpenAI, streamViaServer } from '../lib/directApi';
 
 // Detect if running in Electron (has Codex CLI for GPT 5.3)
 const isElectron = typeof window !== 'undefined' && (window as any).giuseCoder?.isElectron;
@@ -46,6 +47,7 @@ export function ChatPanel() {
   const [newProjectName, setNewProjectName] = useState('');
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const abortRef = useRef<AbortController | null>(null);
 
   // Orchestrator split view state
   const [orchActive, setOrchActive] = useState(false);
@@ -94,6 +96,15 @@ export function ChatPanel() {
     }
 
     setStreaming(false);
+    abortRef.current = null;
+  };
+
+  const stopGeneration = () => {
+    if (abortRef.current) {
+      abortRef.current.abort();
+      abortRef.current = null;
+      setStreaming(false);
+    }
   };
 
   const sendOrchestrated = async (chatHistory: Array<{role: string; content: string}>, settings: ReturnType<typeof useSettings.getState>) => {
@@ -188,45 +199,49 @@ export function ChatPanel() {
     };
     addMessage(assistantMsg);
 
-    try {
-      let res: Response;
+    const abort = new AbortController();
+    abortRef.current = abort;
 
-      if (provider === 'codex-cli') {
-        // GPT 5.3 Codex — via Codex CLI on local server
-        res = await fetch('/api/chat/codex', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            prompt: chatHistory[chatHistory.length - 1]?.content || '',
-            model: currentModel,
-          }),
-        });
-      } else {
-        res = await fetch('/api/chat', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
+    try {
+      const onToken = (text: string) => appendToLast(text);
+
+      if (isElectronApp) {
+        // Direct API calls in Electron (no server needed)
+        if (provider === 'anthropic') {
+          await streamAnthropic({
             messages: chatHistory,
             model: currentModel,
-            apiKey: provider === 'openai' ? settings.openaiKey : apiKey,
-            provider,
-          }),
+            apiKey,
+            signal: abort.signal,
+            onToken,
+          });
+        } else if (provider === 'openai' || provider === 'codex-cli') {
+          await streamOpenAI({
+            messages: chatHistory,
+            model: provider === 'codex-cli' ? 'gpt-5.3-codex' : currentModel,
+            apiKey: settings.openaiKey || apiKey,
+            signal: abort.signal,
+            onToken,
+          });
+        }
+      } else {
+        // Web mode: proxy through server
+        await streamViaServer({
+          messages: chatHistory,
+          model: currentModel,
+          apiKey,
+          provider,
+          openaiKey: settings.openaiKey,
+          signal: abort.signal,
+          onToken,
         });
       }
-
-      const reader = res.body?.getReader();
-      const decoder = new TextDecoder();
-
-      if (reader) {
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          const text = decoder.decode(value, { stream: true });
-          appendToLast(text);
-        }
-      }
     } catch (err: unknown) {
-      appendToLast(`\n\n**Error:** ${err instanceof Error ? err.message : 'Unknown error'}`);
+      if (err instanceof Error && err.name === 'AbortError') {
+        appendToLast('\n\n*[Stopped]*');
+      } else {
+        appendToLast(`\n\n**Error:** ${err instanceof Error ? err.message : 'Unknown error'}`);
+      }
     }
   };
 
@@ -381,13 +396,23 @@ export function ChatPanel() {
             rows={2}
             disabled={isStreaming}
           />
-          <button
-            onClick={sendMessage}
-            disabled={isStreaming || !input.trim()}
-            className="px-3 bg-accent hover:bg-accent/80 disabled:opacity-30 disabled:cursor-not-allowed text-base rounded transition-colors"
-          >
-            <Send className="w-4 h-4" />
-          </button>
+          {isStreaming ? (
+            <button
+              onClick={stopGeneration}
+              className="px-3 bg-red hover:bg-red/80 text-white rounded transition-colors"
+              title="Stop generation"
+            >
+              <StopCircle className="w-4 h-4" />
+            </button>
+          ) : (
+            <button
+              onClick={sendMessage}
+              disabled={!input.trim()}
+              className="px-3 bg-accent hover:bg-accent/80 disabled:opacity-30 disabled:cursor-not-allowed text-base rounded transition-colors"
+            >
+              <Send className="w-4 h-4" />
+            </button>
+          )}
         </div>
       </div>
     </div>
