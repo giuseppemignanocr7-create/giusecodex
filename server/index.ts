@@ -165,7 +165,7 @@ Be concise and direct. Use markdown with code blocks.`;
           Authorization: `Bearer ${apiKey}`,
         },
         body: JSON.stringify({
-          model: model || 'gpt-5.3-codex',
+          model: model || 'gpt-5.2',
           messages: [{ role: 'system', content: system }, ...messages],
           max_tokens: 8192,
           stream: true,
@@ -323,7 +323,7 @@ app.get('/api/health', (_req, res) => {
   res.json({
     status: 'ok',
     codex: codexAvailable,
-    codeModel: codexAvailable ? 'gpt-5.3-codex (CLI)' : 'gpt-5.2-codex (API)',
+    codeModel: codexAvailable ? 'gpt-5.3-codex (CLI)' : 'gpt-5.2 (API)',
   });
 });
 
@@ -339,5 +339,5 @@ if (staticDir) {
 const PORT = parseInt(process.env.PORT || '4000');
 app.listen(PORT, () => {
   console.log(`GiuseCoder server running on http://localhost:${PORT}`);
-  console.log(`Code agent: ${codexAvailable ? 'GPT 5.3 Codex (CLI)' : 'GPT 5.2-codex (API fallback)'}`);
+  console.log(`Code agent: ${codexAvailable ? 'GPT 5.3 Codex (CLI)' : 'GPT 5.2 (API fallback)'}`);
 });

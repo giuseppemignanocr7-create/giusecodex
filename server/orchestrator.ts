@@ -29,7 +29,7 @@ interface TaskPlan {
 const OPUS_SYSTEM = `You are GiuseCoder Opus, the CTO and lead architect.
 Your role:
 1. ANALYZE the user's request
-2. PLAN: decide if it needs UI/design work (Sonnet) and/or code (Codex GPT 5.3)
+2. PLAN: decide if it needs UI/design work (Sonnet 4.5) and/or code (GPT 5.2)
 3. DELEGATE: create clear prompts for each agent
 4. REVIEW: combine their outputs and give the final answer
 
@@ -39,8 +39,8 @@ You MUST respond with a JSON plan in this exact format:
   "summary": "Brief analysis of what the user wants",
   "needsDesign": true/false,
   "needsCode": true/false,
-  "designPrompt": "Detailed prompt for Sonnet (UI/CSS/layout/design). Empty string if not needed.",
-  "codePrompt": "Detailed prompt for GPT 5.3 Codex (implementation/logic/backend). Empty string if not needed."
+  "designPrompt": "Detailed prompt for Sonnet 4.5 (UI/CSS/layout/design). Empty string if not needed.",
+  "codePrompt": "Detailed prompt for GPT 5.2 (implementation/logic/backend). Empty string if not needed."
 }
 \`\`\`
 
@@ -110,16 +110,30 @@ export async function orchestrate(
     tasks.push((async () => {
       config.onStep({ agent: 'sonnet', label: 'Sonnet designing UI...', status: 'running' });
       const designMessages = [...messages, { role: 'user', content: plan.designPrompt }];
-      results.design = await callAnthropic(anthropic, 'claude-sonnet-4-20250514', SONNET_SYSTEM, designMessages, config, 'sonnet');
+      results.design = await callAnthropic(anthropic, 'claude-sonnet-4-5-20250929', SONNET_SYSTEM, designMessages, config, 'sonnet');
       config.onStep({ agent: 'sonnet', label: 'Sonnet design complete', status: 'done', content: results.design });
     })());
   }
 
   if (plan.needsCode) {
     tasks.push((async () => {
-      config.onStep({ agent: 'codex', label: 'GPT 5.3 Codex writing code...', status: 'running' });
-      results.code = await callCodexCLI(plan.codePrompt, config);
-      config.onStep({ agent: 'codex', label: 'GPT 5.3 Codex complete', status: 'done', content: results.code });
+      config.onStep({ agent: 'codex', label: 'GPT 5.2 writing code...', status: 'running' });
+      const codeMessages = [...messages, { role: 'user', content: plan.codePrompt }];
+      try {
+        if (!config.openaiKey) {
+          throw new Error('OpenAI key missing');
+        }
+        results.code = await callOpenAI(config.openaiKey, 'gpt-5.2', CODEX_SYSTEM, codeMessages, config);
+        if (!results.code?.trim()) {
+          throw new Error('GPT returned empty output');
+        }
+      } catch (openaiErr: unknown) {
+        const msg = openaiErr instanceof Error ? openaiErr.message : 'OpenAI failed';
+        config.onToken('codex', `\n[Fallback] ${msg}\n`);
+        config.onStep({ agent: 'codex', label: 'Fallback: Sonnet 4.5 generating code...', status: 'running' });
+        results.code = await callAnthropic(anthropic, 'claude-sonnet-4-5-20250929', CODEX_SYSTEM, codeMessages, config, 'codex');
+      }
+      config.onStep({ agent: 'codex', label: 'Code complete', status: 'done', content: results.code });
     })());
   }
 
@@ -147,7 +161,7 @@ function buildReviewPrompt(plan: TaskPlan, results: { design?: string; code?: st
     prompt += `## Sonnet's UI/Design Output:\n${results.design}\n\n`;
   }
   if (results.code) {
-    prompt += `## GPT 5.3 Codex Code Output:\n${results.code}\n\n`;
+    prompt += `## GPT 5.2 Code Output:\n${results.code}\n\n`;
   }
 
   prompt += `Please combine these into a single, polished response for the user. Resolve any conflicts and present the complete solution.`;
@@ -185,42 +199,61 @@ async function callAnthropic(
   return result;
 }
 
-async function callCodexCLI(
-  prompt: string,
+async function callOpenAI(
+  apiKey: string,
+  model: string,
+  system: string,
+  messages: Array<{ role: string; content: string }>,
   config: OrchestratorConfig
 ): Promise<string> {
-  const { spawn } = await import('child_process');
-
-  return new Promise((resolve, reject) => {
-    let result = '';
-    const codex = spawn('codex', [
-      'exec',
-      '-m', 'gpt-5.3-codex',
-      prompt,
-    ], { shell: true, cwd: process.cwd() });
-
-    codex.stdout.on('data', (data: Buffer) => {
-      const text = data.toString();
-      result += text;
-      config.onToken('codex', text);
-    });
-
-    codex.stderr.on('data', (data: Buffer) => {
-      const text = data.toString();
-      result += text;
-      config.onToken('codex', text);
-    });
-
-    codex.on('close', (code: number | null) => {
-      if (code === 0 || result.length > 0) {
-        resolve(result);
-      } else {
-        reject(new Error(`Codex CLI exited with code ${code}`));
-      }
-    });
-
-    codex.on('error', (err: Error) => {
-      reject(new Error(`Codex CLI error: ${err.message}`));
-    });
+  const res = await fetch('https://api.openai.com/v1/chat/completions', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify({
+      model,
+      stream: true,
+      messages: [
+        { role: 'system', content: system },
+        ...messages.map(m => ({ role: m.role as 'user' | 'assistant', content: m.content })),
+      ],
+    }),
   });
+
+  if (!res.ok) {
+    const err = await res.text().catch(() => 'Unknown error');
+    throw new Error(`OpenAI API ${res.status}: ${err.slice(0, 200)}`);
+  }
+
+  let result = '';
+  const reader = res.body?.getReader();
+  if (!reader) throw new Error('No response body');
+  const decoder = new TextDecoder();
+  let buffer = '';
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split('\n');
+    buffer = lines.pop() || '';
+
+    for (const line of lines) {
+      if (!line.startsWith('data: ')) continue;
+      const data = line.slice(6).trim();
+      if (data === '[DONE]') continue;
+      try {
+        const parsed = JSON.parse(data);
+        const content = parsed.choices?.[0]?.delta?.content;
+        if (content) {
+          result += content;
+          config.onToken('codex', content);
+        }
+      } catch { /* skip malformed */ }
+    }
+  }
+
+  return result;
 }

@@ -10,7 +10,7 @@ const MODELS = [
   { id: 'claude-sonnet-4-5-20250929', label: 'Sonnet 4.5', desc: 'UI/design — Anthropic API key', color: 'bg-accent' },
   { id: 'claude-haiku-4-5-20251001', label: 'Haiku 4.5', desc: 'Fast triage — Anthropic API key', color: 'bg-green' },
   ...(isElectron ? [{ id: 'gpt-5.3-codex', label: 'GPT 5.3 Codex', desc: 'Code gen — Local Codex CLI', color: 'bg-yellow' }] : []),
-  { id: 'gpt-5.2-codex', label: 'GPT 5.2 Codex', desc: 'Best code agent — OpenAI API key', color: 'bg-yellow' },
+  { id: 'gpt-5.2', label: 'GPT 5.2', desc: 'Best code agent — OpenAI API key', color: 'bg-yellow' },
   { id: 'o3', label: 'o3', desc: 'Reasoning — OpenAI API key', color: 'bg-yellow' },
 ];
 

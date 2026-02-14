@@ -17,7 +17,7 @@ const MODELS = [
   { id: 'claude-sonnet-4-5-20250929', label: 'Sonnet 4.5', desc: 'UI/Design', color: 'text-accent', provider: 'anthropic' },
   { id: 'claude-haiku-4-5-20251001', label: 'Haiku 4.5', desc: 'Fast', color: 'text-green', provider: 'anthropic' },
   ...(isElectron ? [{ id: 'gpt-5.3-codex', label: 'GPT 5.3 Codex', desc: 'Local CLI', color: 'text-yellow', provider: 'codex-cli' as const }] : []),
-  { id: 'gpt-5.2-codex', label: 'GPT 5.2 Codex', desc: 'Best code via API', color: 'text-yellow', provider: 'openai' },
+  { id: 'gpt-5.2', label: 'GPT 5.2', desc: 'Best code via API', color: 'text-yellow', provider: 'openai' },
   { id: 'o3', label: 'o3', desc: 'Reasoning', color: 'text-yellow', provider: 'openai' },
 ];
 
@@ -32,9 +32,9 @@ const roleColors: Record<AgentRole, string> = {
 
 const roleLabels: Record<AgentRole, string> = {
   haiku: 'Haiku 4.5',
-  sonnet: 'Sonnet 4',
+  sonnet: 'Sonnet 4.5',
   opus: 'Opus 4.6',
-  codex: 'GPT 5.3 Codex',
+  codex: 'GPT 5.2',
   user: 'You',
   system: 'System',
 };
@@ -57,7 +57,7 @@ export function ChatPanel() {
   const [orchActive, setOrchActive] = useState(false);
   const [opusAnalysis, setOpusAnalysis] = useState<AgentStream>({ ...defaultStream(), agent: 'opus', label: 'Opus 4.6 — CTO Analysis' });
   const [sonnetStream, setSonnetStream] = useState<AgentStream>({ ...defaultStream(), agent: 'sonnet', label: 'Sonnet 4.5 — UI/Design' });
-  const [codexStream, setCodexStream] = useState<AgentStream>({ ...defaultStream(), agent: 'codex', label: 'GPT 5.3 Codex — Code' });
+  const [codexStream, setCodexStream] = useState<AgentStream>({ ...defaultStream(), agent: 'codex', label: 'GPT 5.2 — Code' });
   const [opusReview, setOpusReview] = useState<AgentStream>({ ...defaultStream(), agent: 'opus', label: 'Opus 4.6 — Final Review' });
 
   useEffect(() => {
@@ -66,7 +66,13 @@ export function ChatPanel() {
 
   useEffect(() => { projects.loadProjects(); }, []);
 
-  const selectedModel = MODELS.find(m => m.id === currentModel) || MODELS[1];
+  const normalizedModel = currentModel === 'gpt-5.2-codex'
+    ? 'gpt-5.2'
+    : currentModel === 'claude-sonnet-4-20250514'
+      ? 'claude-sonnet-4-5-20250929'
+      : currentModel;
+
+  const selectedModel = MODELS.find(m => m.id === normalizedModel) || MODELS[1];
 
   const sendMessage = async () => {
     if (!input.trim() || isStreaming) return;
@@ -88,6 +94,7 @@ export function ChatPanel() {
 
     const settings = useSettings.getState();
     const orchestratorEnabled = settings.orchestratorEnabled;
+    const shouldRunOrchestrator = orchestratorEnabled && !isElectronApp;
     const rawHistory = [...messages, userMsg].filter(m => m.role === 'user' || ['haiku', 'sonnet', 'opus', 'codex'].includes(m.role)).map(m => ({
       role: m.role === 'user' ? 'user' : 'assistant',
       content: m.content,
@@ -97,7 +104,7 @@ export function ChatPanel() {
       ? [{ role: 'user', content: ASK_SYSTEM_PROMPT }, { role: 'assistant', content: 'Understood. I\'m in Ask mode — I\'ll explain and guide without generating code unless you ask.' }, ...rawHistory]
       : rawHistory;
 
-    if (orchestratorEnabled) {
+    if (shouldRunOrchestrator) {
       await sendOrchestrated(chatHistory, settings);
     } else {
       await sendDirect(chatHistory, settings);
@@ -119,8 +126,8 @@ export function ChatPanel() {
     // Activate split view and reset streams
     setOrchActive(true);
     setOpusAnalysis({ agent: 'opus', content: '', status: 'running', label: 'Opus 4.6 — CTO Analysis' });
-    setSonnetStream({ agent: 'sonnet', content: '', status: 'idle', label: 'Sonnet 4 — UI/Design' });
-    setCodexStream({ agent: 'codex', content: '', status: 'idle', label: 'GPT 5.3 Codex — Code' });
+    setSonnetStream({ agent: 'sonnet', content: '', status: 'idle', label: 'Sonnet 4.5 — UI/Design' });
+    setCodexStream({ agent: 'codex', content: '', status: 'idle', label: 'GPT 5.2 — Code' });
     setOpusReview({ agent: 'opus', content: '', status: 'idle', label: 'Opus 4.6 — Final Review' });
 
     try {
@@ -134,59 +141,65 @@ export function ChatPanel() {
         }),
       });
 
+      if (!res.ok) {
+        const errText = await res.text().catch(() => 'Unknown error');
+        throw new Error(`Orchestrator API ${res.status}: ${errText.slice(0, 200)}`);
+      }
+
       const reader = res.body?.getReader();
+      if (!reader) {
+        throw new Error('Orchestrator stream missing response body');
+      }
       const decoder = new TextDecoder();
       let buffer = '';
 
-      if (reader) {
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          buffer += decoder.decode(value, { stream: true });
-          const lines = buffer.split('\n');
-          buffer = lines.pop() || '';
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
 
-          for (const line of lines) {
-            if (!line.startsWith('data: ') || line === 'data: [DONE]') continue;
-            try {
-              const event = JSON.parse(line.slice(6));
+        for (const line of lines) {
+          if (!line.startsWith('data: ') || line === 'data: [DONE]') continue;
+          try {
+            const event = JSON.parse(line.slice(6));
 
-              if (event.type === 'step') {
-                const update = { status: event.status as AgentStream['status'], label: event.label };
-                if (event.agent === 'opus' && event.label.includes('Review')) {
-                  setOpusReview(prev => ({ ...prev, ...update }));
-                } else if (event.agent === 'opus') {
-                  setOpusAnalysis(prev => ({ ...prev, ...update }));
-                } else if (event.agent === 'sonnet') {
-                  setSonnetStream(prev => ({ ...prev, ...update }));
-                } else if (event.agent === 'codex') {
-                  setCodexStream(prev => ({ ...prev, ...update }));
-                }
-              } else if (event.type === 'token') {
-                // Route tokens to the correct agent panel
-                if (event.agent === 'sonnet') {
-                  setSonnetStream(prev => ({ ...prev, content: prev.content + event.text }));
-                } else if (event.agent === 'codex') {
-                  setCodexStream(prev => ({ ...prev, content: prev.content + event.text }));
-                } else if (event.agent === 'opus') {
-                  // Check if we're in review phase
-                  setOpusReview(prev => {
-                    if (prev.status === 'running') return { ...prev, content: prev.content + event.text };
-                    return prev;
-                  });
-                  setOpusAnalysis(prev => {
-                    if (prev.status === 'running') return { ...prev, content: prev.content + event.text };
-                    return prev;
-                  });
-                }
-              } else if (event.type === 'done') {
-                // Save to project
-                projects.save();
-              } else if (event.type === 'error') {
-                setOpusReview(prev => ({ ...prev, content: prev.content + `\n\n**Error:** ${event.message}`, status: 'error' }));
+            if (event.type === 'step') {
+              const update = { status: event.status as AgentStream['status'], label: event.label };
+              if (event.agent === 'opus' && event.label.includes('Review')) {
+                setOpusReview(prev => ({ ...prev, ...update }));
+              } else if (event.agent === 'opus') {
+                setOpusAnalysis(prev => ({ ...prev, ...update }));
+              } else if (event.agent === 'sonnet') {
+                setSonnetStream(prev => ({ ...prev, ...update }));
+              } else if (event.agent === 'codex') {
+                setCodexStream(prev => ({ ...prev, ...update }));
               }
-            } catch { /* skip malformed */ }
-          }
+            } else if (event.type === 'token') {
+              // Route tokens to the correct agent panel
+              if (event.agent === 'sonnet') {
+                setSonnetStream(prev => ({ ...prev, content: prev.content + event.text }));
+              } else if (event.agent === 'codex') {
+                setCodexStream(prev => ({ ...prev, content: prev.content + event.text }));
+              } else if (event.agent === 'opus') {
+                // Check if we're in review phase
+                setOpusReview(prev => {
+                  if (prev.status === 'running') return { ...prev, content: prev.content + event.text };
+                  return prev;
+                });
+                setOpusAnalysis(prev => {
+                  if (prev.status === 'running') return { ...prev, content: prev.content + event.text };
+                  return prev;
+                });
+              }
+            } else if (event.type === 'done') {
+              // Save to project
+              projects.save();
+            } else if (event.type === 'error') {
+              setOpusReview(prev => ({ ...prev, content: prev.content + `\n\n**Error:** ${event.message}`, status: 'error' }));
+            }
+          } catch { /* skip malformed */ }
         }
       }
     } catch (err: unknown) {
@@ -195,15 +208,15 @@ export function ChatPanel() {
   };
 
   const sendDirect = async (chatHistory: Array<{role: string; content: string}>, settings: ReturnType<typeof useSettings.getState>) => {
-    const modelInfo = MODELS.find(m => m.id === currentModel);
+    const modelInfo = MODELS.find(m => m.id === normalizedModel);
     const provider = modelInfo?.provider || 'anthropic';
-    const assistantRole: AgentRole = provider === 'codex-cli' || provider === 'openai' ? 'codex' : currentModel.includes('haiku') ? 'haiku' : currentModel.includes('opus') ? 'opus' : 'sonnet';
+    const assistantRole: AgentRole = provider === 'codex-cli' || provider === 'openai' ? 'codex' : normalizedModel.includes('haiku') ? 'haiku' : normalizedModel.includes('opus') ? 'opus' : 'sonnet';
     const assistantMsg: ChatMessage = {
       id: crypto.randomUUID(),
       role: assistantRole,
       content: '',
       timestamp: Date.now(),
-      model: currentModel,
+      model: normalizedModel,
     };
     addMessage(assistantMsg);
 
@@ -218,7 +231,7 @@ export function ChatPanel() {
         if (provider === 'anthropic') {
           await streamAnthropic({
             messages: chatHistory,
-            model: currentModel,
+            model: normalizedModel,
             apiKey,
             signal: abort.signal,
             onToken,
@@ -226,7 +239,7 @@ export function ChatPanel() {
         } else if (provider === 'openai' || provider === 'codex-cli') {
           await streamOpenAI({
             messages: chatHistory,
-            model: provider === 'codex-cli' ? 'gpt-5.3-codex' : currentModel,
+            model: provider === 'codex-cli' ? 'gpt-5.3-codex' : normalizedModel,
             apiKey: settings.openaiKey || apiKey,
             signal: abort.signal,
             onToken,
@@ -236,7 +249,7 @@ export function ChatPanel() {
         // Web mode: proxy through server
         await streamViaServer({
           messages: chatHistory,
-          model: currentModel,
+          model: normalizedModel,
           apiKey,
           provider,
           openaiKey: settings.openaiKey,

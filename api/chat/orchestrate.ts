@@ -3,7 +3,7 @@ export const config = { runtime: 'edge' };
 const OPUS_SYSTEM = `You are GiuseCoder Opus, the CTO and lead architect.
 Your role:
 1. ANALYZE the user's request
-2. PLAN: decide if it needs UI/design work (Sonnet) and/or code (Codex GPT 5.3)
+2. PLAN: decide if it needs UI/design work (Sonnet 4.5) and/or code (GPT 5.2)
 3. DELEGATE: create clear prompts for each agent
 4. REVIEW: combine their outputs and give the final answer
 
@@ -13,8 +13,8 @@ Respond with JSON:
   "summary": "Brief analysis",
   "needsDesign": true/false,
   "needsCode": true/false,
-  "designPrompt": "Prompt for Sonnet (UI/CSS/layout). Empty if not needed.",
-  "codePrompt": "Prompt for GPT 5.3 Codex (logic/backend). Empty if not needed."
+  "designPrompt": "Prompt for Sonnet 4.5 (UI/CSS/layout). Empty if not needed.",
+  "codePrompt": "Prompt for GPT 5.2 (logic/backend). Empty if not needed."
 }
 \`\`\`
 If simple question, set both false and answer in summary.`;
@@ -35,6 +35,10 @@ async function streamAnthropic(
     headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' },
     body: JSON.stringify({ model, max_tokens: 8192, system, messages: msgs, stream: true }),
   });
+  if (!res.ok) {
+    const errText = await res.text().catch(() => 'Unknown error');
+    throw new Error(`Anthropic API ${res.status}: ${errText.slice(0, 200)}`);
+  }
   let result = '';
   const reader = res.body!.getReader();
   const dec = new TextDecoder();
@@ -72,6 +76,10 @@ async function streamOpenAI(
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
     body: JSON.stringify({ model, messages: [{ role: 'system', content: system }, ...msgs], max_tokens: 8192, stream: true }),
   });
+  if (!res.ok) {
+    const errText = await res.text().catch(() => 'Unknown error');
+    throw new Error(`OpenAI API ${res.status}: ${errText.slice(0, 200)}`);
+  }
   let result = '';
   const reader = res.body!.getReader();
   const dec = new TextDecoder();
@@ -132,14 +140,12 @@ export default async function handler(req: Request) {
       } catch {
         await send('done', { content: planText });
         await writer.write(encoder.encode('data: [DONE]\n\n'));
-        await writer.close();
         return;
       }
 
       if (!plan.needsDesign && !plan.needsCode) {
         await send('done', { content: plan.summary });
         await writer.write(encoder.encode('data: [DONE]\n\n'));
-        await writer.close();
         return;
       }
 
@@ -150,7 +156,7 @@ export default async function handler(req: Request) {
       if (plan.needsDesign) {
         tasks.push((async () => {
           await send('step', { agent: 'sonnet', label: 'Sonnet designing UI...', status: 'running' });
-          results.design = await streamAnthropic(anthropicKey, 'claude-sonnet-4-20250514', SONNET_SYSTEM,
+          results.design = await streamAnthropic(anthropicKey, 'claude-sonnet-4-5-20250929', SONNET_SYSTEM,
             [...messages, { role: 'user', content: plan.designPrompt }], writer, encoder, 'sonnet');
           await send('step', { agent: 'sonnet', label: 'Design complete', status: 'done' });
         })());
@@ -158,15 +164,26 @@ export default async function handler(req: Request) {
 
       if (plan.needsCode && openaiKey) {
         tasks.push((async () => {
-          await send('step', { agent: 'codex', label: 'GPT 5.2-Codex writing code...', status: 'running' });
-          results.code = await streamOpenAI(openaiKey, 'gpt-5.2-codex', CODEX_SYSTEM,
-            [...messages, { role: 'user', content: plan.codePrompt }], writer, encoder, 'codex');
+          await send('step', { agent: 'codex', label: 'GPT 5.2 writing code...', status: 'running' });
+          try {
+            results.code = await streamOpenAI(openaiKey, 'gpt-5.2', CODEX_SYSTEM,
+              [...messages, { role: 'user', content: plan.codePrompt }], writer, encoder, 'codex');
+            if (!results.code?.trim()) {
+              throw new Error('GPT returned empty output');
+            }
+          } catch (openaiErr: unknown) {
+            const msg = openaiErr instanceof Error ? openaiErr.message : 'OpenAI failed';
+            await send('token', { agent: 'codex', text: `\n[Fallback] ${msg}\n` });
+            await send('step', { agent: 'codex', label: 'Fallback: Sonnet 4.5 generating code...', status: 'running' });
+            results.code = await streamAnthropic(anthropicKey, 'claude-sonnet-4-5-20250929', CODEX_SYSTEM,
+              [...messages, { role: 'user', content: plan.codePrompt }], writer, encoder, 'codex');
+          }
           await send('step', { agent: 'codex', label: 'Code complete', status: 'done' });
         })());
       } else if (plan.needsCode) {
         tasks.push((async () => {
-          await send('step', { agent: 'codex', label: 'Sonnet writing code (no OpenAI key)...', status: 'running' });
-          results.code = await streamAnthropic(anthropicKey, 'claude-sonnet-4-20250514', CODEX_SYSTEM,
+          await send('step', { agent: 'codex', label: 'Sonnet 4.5 writing code (no OpenAI key)...', status: 'running' });
+          results.code = await streamAnthropic(anthropicKey, 'claude-sonnet-4-5-20250929', CODEX_SYSTEM,
             [...messages, { role: 'user', content: plan.codePrompt }], writer, encoder, 'codex');
           await send('step', { agent: 'codex', label: 'Code complete', status: 'done' });
         })());
@@ -190,7 +207,11 @@ export default async function handler(req: Request) {
     } catch (err: unknown) {
       await send('error', { message: err instanceof Error ? err.message : 'Unknown error' });
     } finally {
-      await writer.close();
+      try {
+        await writer.close();
+      } catch {
+        // stream may already be closed in some return paths
+      }
     }
   })();
 
