@@ -1,5 +1,5 @@
-import { useState, useRef, useCallback, useEffect, useMemo } from 'react';
-import { RefreshCw, ExternalLink, Globe, Monitor, Tablet, Smartphone, Maximize2, Play, Link } from 'lucide-react';
+import { useState, useRef, useCallback, useMemo } from 'react';
+import { RefreshCw, Globe, Monitor, Tablet, Smartphone, Maximize2, Play, Link } from 'lucide-react';
 import { useFileStore } from '../stores/fileStore';
 import { useChat } from '../stores/chatStore';
 
@@ -77,16 +77,20 @@ export function PreviewPanel() {
     }
   };
 
-  const openInNewWindow = useCallback(() => {
-    if (previewMode === 'url' && url) {
-      window.open(url, 'GiuseCoder Preview', 'width=800,height=900');
-    } else if (autoContent) {
-      const win = window.open('', 'GiuseCoder Preview', 'width=800,height=900');
-      if (win) { win.document.write(autoContent); win.document.close(); }
-    }
-  }, [url, autoContent, previewMode]);
-
   const currentDevice = DEVICES.find(d => d.mode === device) || DEVICES[0];
+
+  const openInNewWindow = useCallback(() => {
+    const features = `noopener,noreferrer,width=${currentDevice.width},height=${currentDevice.height}`;
+
+    if (previewMode === 'url' && url) {
+      window.open(url, '_blank', features);
+    } else if (autoContent) {
+      const blob = new Blob([autoContent], { type: 'text/html' });
+      const blobUrl = URL.createObjectURL(blob);
+      window.open(blobUrl, '_blank', features);
+      setTimeout(() => URL.revokeObjectURL(blobUrl), 60_000);
+    }
+  }, [url, autoContent, previewMode, currentDevice.width, currentDevice.height]);
 
   return (
     <div className="h-full flex flex-col bg-surface">

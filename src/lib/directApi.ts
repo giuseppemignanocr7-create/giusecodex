@@ -7,6 +7,7 @@ export const isElectronApp = typeof window !== 'undefined' && window.location.pr
 export async function streamAnthropic(params: {
   messages: Array<{ role: string; content: string }>;
   model: string;
+  systemPrompt?: string;
   apiKey: string;
   signal?: AbortSignal;
   onToken: (text: string) => void;
@@ -23,6 +24,7 @@ export async function streamAnthropic(params: {
       model: params.model,
       max_tokens: 8192,
       stream: true,
+      system: params.systemPrompt,
       messages: params.messages.map(m => ({
         role: m.role === 'user' ? 'user' : 'assistant',
         content: m.content,
@@ -66,6 +68,7 @@ export async function streamAnthropic(params: {
 export async function streamOpenAI(params: {
   messages: Array<{ role: string; content: string }>;
   model: string;
+  systemPrompt?: string;
   apiKey: string;
   signal?: AbortSignal;
   onToken: (text: string) => void;
@@ -79,10 +82,13 @@ export async function streamOpenAI(params: {
     body: JSON.stringify({
       model: params.model,
       stream: true,
-      messages: params.messages.map(m => ({
-        role: m.role === 'user' ? 'user' : 'assistant',
-        content: m.content,
-      })),
+      messages: [
+        ...(params.systemPrompt ? [{ role: 'system', content: params.systemPrompt }] : []),
+        ...params.messages.map(m => ({
+          role: m.role === 'user' ? 'user' : 'assistant',
+          content: m.content,
+        })),
+      ],
     }),
     signal: params.signal,
   });
@@ -123,6 +129,7 @@ export async function streamViaServer(params: {
   model: string;
   apiKey: string;
   provider: string;
+  systemPrompt?: string;
   openaiKey?: string;
   signal?: AbortSignal;
   onToken: (text: string) => void;
@@ -135,6 +142,7 @@ export async function streamViaServer(params: {
       model: params.model,
       apiKey: params.provider === 'openai' ? params.openaiKey : params.apiKey,
       provider: params.provider,
+      systemPrompt: params.systemPrompt,
     }),
     signal: params.signal,
   });

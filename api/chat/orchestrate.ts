@@ -22,6 +22,10 @@ If simple question, set both false and answer in summary.`;
 const SONNET_SYSTEM = `You are GiuseCoder Sonnet, the UI/UX designer. Create beautiful modern UI with TailwindCSS + React + TypeScript. Be concise, output ready-to-use code.`;
 const CODEX_SYSTEM = `You are GiuseCoder Codex, the senior developer. Write clean production-ready TypeScript code with proper error handling. Be concise, output working code with file paths.`;
 const REVIEW_SYSTEM = `You are GiuseCoder Opus reviewing your team's work. Combine the outputs into a single polished response. Present final code in markdown blocks with file paths.`;
+const ASK_OPUS_SYSTEM = `You are GiuseCoder Opus in ASK mode.
+The user wants guidance, explanations, architecture reasoning, debugging help, or reviews.
+Do NOT proactively generate full implementation code unless explicitly requested.
+Be concise, practical, and clear.`;
 
 // Helper: stream Anthropic and collect text, writing SSE events
 async function streamAnthropic(
@@ -111,7 +115,7 @@ export default async function handler(req: Request) {
     return new Response(JSON.stringify({ error: 'Method not allowed' }), { status: 405 });
   }
 
-  const { messages, anthropicKey, openaiKey } = await req.json();
+  const { messages, anthropicKey, openaiKey, chatMode } = await req.json();
   if (!anthropicKey) {
     return new Response(JSON.stringify({ error: 'Anthropic API key required' }), { status: 400 });
   }
@@ -127,6 +131,15 @@ export default async function handler(req: Request) {
   // Run pipeline in background
   (async () => {
     try {
+      if (chatMode === 'ask') {
+        await send('step', { agent: 'opus', label: 'Opus answering in Ask mode...', status: 'running' });
+        const askText = await streamAnthropic(anthropicKey, 'claude-opus-4-6', ASK_OPUS_SYSTEM, messages, writer, encoder, 'opus');
+        await send('step', { agent: 'opus', label: 'Ask response complete', status: 'done' });
+        await send('done', { content: askText });
+        await writer.write(encoder.encode('data: [DONE]\n\n'));
+        return;
+      }
+
       // Step 1: Opus plans
       await send('step', { agent: 'opus', label: 'Opus analyzing request...', status: 'running' });
       const planText = await streamAnthropic(anthropicKey, 'claude-opus-4-6', OPUS_SYSTEM, messages, writer, encoder, 'opus');

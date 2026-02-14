@@ -1,21 +1,47 @@
+import { useCallback, useEffect } from 'react';
 import { useFileStore } from '../stores/fileStore';
 import Editor from '@monaco-editor/react';
-import { X, Circle } from 'lucide-react';
+import { X, Circle, FolderOpen, MessageSquare } from 'lucide-react';
 
 export function EditorTabs() {
   const { openFiles, activeFile, setActiveFile, closeFile, updateContent } = useFileStore();
 
   const active = openFiles.find(f => f.path === activeFile);
 
-  const handleSave = async () => {
-    if (!active) return;
+  const saveFile = useCallback(async (path: string, content: string) => {
     await fetch('/api/files/write', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ path: active.path, content: active.content }),
+      body: JSON.stringify({ path, content }),
     });
-    useFileStore.getState().markSaved(active.path);
-  };
+    useFileStore.getState().markSaved(path);
+  }, []);
+
+  const handleSave = useCallback(async () => {
+    if (!active) return;
+    await saveFile(active.path, active.content);
+  }, [active, saveFile]);
+
+  const handleSaveAll = useCallback(async () => {
+    const files = useFileStore.getState().openFiles;
+    for (const f of files) {
+      if (!f.dirty) continue;
+      await saveFile(f.path, f.content);
+    }
+  }, [saveFile]);
+
+  useEffect(() => {
+    const onSaveActive = () => { void handleSave(); };
+    const onSaveAll = () => { void handleSaveAll(); };
+
+    window.addEventListener('gc:save-active-file', onSaveActive as EventListener);
+    window.addEventListener('gc:save-all-files', onSaveAll as EventListener);
+
+    return () => {
+      window.removeEventListener('gc:save-active-file', onSaveActive as EventListener);
+      window.removeEventListener('gc:save-all-files', onSaveAll as EventListener);
+    };
+  }, [handleSave, handleSaveAll]);
 
   return (
     <div className="h-full flex flex-col bg-base">
@@ -68,13 +94,25 @@ export function EditorTabs() {
             }}
           />
         ) : (
-          <div className="h-full flex items-center justify-center">
-            <div className="text-center">
-              <p className="text-3xl font-bold text-accent/30 mb-2">GiuseCoder</p>
-              <p className="text-muted text-sm">Open a file from the explorer or use Chat AI to generate code</p>
-              <div className="mt-6 flex gap-4 justify-center text-xs text-muted">
-                <kbd className="px-2 py-1 bg-surface rounded">Ctrl+Shift+P</kbd>
-                <span>Command Palette</span>
+          <div className="h-full flex items-start justify-center pt-14 px-5">
+            <div className="w-full max-w-xl rounded-xl border border-base bg-surface/60 p-5">
+              <p className="text-lg font-semibold text-accent/80 mb-1">Ready to build</p>
+              <p className="text-muted text-xs mb-4">Open a folder, then edit files or ask Chat AI to generate code.</p>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  onClick={() => window.dispatchEvent(new CustomEvent('gc:open-folder'))}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded bg-overlay text-xs text-text hover:bg-base transition-colors"
+                >
+                  <FolderOpen className="w-3.5 h-3.5" />
+                  Open folder
+                </button>
+                <button
+                  onClick={() => window.dispatchEvent(new CustomEvent('gc:focus-chat-input'))}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded bg-overlay text-xs text-text hover:bg-base transition-colors"
+                >
+                  <MessageSquare className="w-3.5 h-3.5" />
+                  Ask Chat AI
+                </button>
               </div>
             </div>
           </div>

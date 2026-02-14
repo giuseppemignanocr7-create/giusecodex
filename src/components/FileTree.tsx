@@ -1,4 +1,4 @@
-import { useState, useRef } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { useFileStore, FileNode } from '../stores/fileStore';
 import { ChevronRight, ChevronDown, File, Folder, FolderOpen, RefreshCw, Upload } from 'lucide-react';
 import { isElectronApp } from '../lib/directApi';
@@ -159,6 +159,19 @@ export function FileTree() {
       setTree(data);
     }
   };
+
+  useEffect(() => {
+    const onOpenFolder = () => { void handleOpenFolder(); };
+    const onRefreshTree = () => { void handleRefresh(); };
+
+    window.addEventListener('gc:open-folder', onOpenFolder as EventListener);
+    window.addEventListener('gc:refresh-tree', onRefreshTree as EventListener);
+
+    return () => {
+      window.removeEventListener('gc:open-folder', onOpenFolder as EventListener);
+      window.removeEventListener('gc:refresh-tree', onRefreshTree as EventListener);
+    };
+  }, [projectPath]);
 
   return (
     <div className="h-full flex flex-col bg-surface">

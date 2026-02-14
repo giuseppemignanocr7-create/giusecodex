@@ -8,6 +8,10 @@ import { isElectronApp, streamAnthropic, streamOpenAI, streamViaServer } from '.
 
 type ChatMode = 'code' | 'ask';
 const ASK_SYSTEM_PROMPT = 'You are GiuseCoder, a helpful coding assistant. The user is in ASK mode — answer questions, explain concepts, review code, and provide guidance. Do NOT generate new code unless explicitly asked. Focus on clear explanations.';
+const CODE_SYSTEM_PROMPT = `You are GiuseCoder, a premium AI coding assistant.
+You write clean, idiomatic, production-ready code.
+When modifying code, output the complete changed code with file paths.
+Be concise and direct. Use markdown with code blocks.`;
 
 // Detect if running in Electron (has Codex CLI for GPT 5.3)
 const isElectron = typeof window !== 'undefined' && (window as any).giuseCoder?.isElectron;
@@ -66,6 +70,17 @@ export function ChatPanel() {
 
   useEffect(() => { projects.loadProjects(); }, []);
 
+  useEffect(() => {
+    const onFocusChatInput = () => {
+      inputRef.current?.focus();
+    };
+
+    window.addEventListener('gc:focus-chat-input', onFocusChatInput as EventListener);
+    return () => {
+      window.removeEventListener('gc:focus-chat-input', onFocusChatInput as EventListener);
+    };
+  }, []);
+
   const normalizedModel = currentModel === 'gpt-5.2-codex'
     ? 'gpt-5.2'
     : currentModel === 'claude-sonnet-4-20250514'
@@ -94,20 +109,18 @@ export function ChatPanel() {
 
     const settings = useSettings.getState();
     const orchestratorEnabled = settings.orchestratorEnabled;
-    const shouldRunOrchestrator = orchestratorEnabled && !isElectronApp;
+    const shouldRunOrchestrator = orchestratorEnabled && !isElectronApp && chatMode === 'code';
+    const systemPrompt = chatMode === 'ask' ? ASK_SYSTEM_PROMPT : CODE_SYSTEM_PROMPT;
     const rawHistory = [...messages, userMsg].filter(m => m.role === 'user' || ['haiku', 'sonnet', 'opus', 'codex'].includes(m.role)).map(m => ({
       role: m.role === 'user' ? 'user' : 'assistant',
       content: m.content,
     }));
-    // In Ask mode, prepend a system-like user message for context
-    const chatHistory = chatMode === 'ask'
-      ? [{ role: 'user', content: ASK_SYSTEM_PROMPT }, { role: 'assistant', content: 'Understood. I\'m in Ask mode — I\'ll explain and guide without generating code unless you ask.' }, ...rawHistory]
-      : rawHistory;
+    const chatHistory = rawHistory;
 
     if (shouldRunOrchestrator) {
-      await sendOrchestrated(chatHistory, settings);
+      await sendOrchestrated(chatHistory, settings, chatMode);
     } else {
-      await sendDirect(chatHistory, settings);
+      await sendDirect(chatHistory, settings, systemPrompt);
     }
 
     setStreaming(false);
@@ -122,7 +135,7 @@ export function ChatPanel() {
     }
   };
 
-  const sendOrchestrated = async (chatHistory: Array<{role: string; content: string}>, settings: ReturnType<typeof useSettings.getState>) => {
+  const sendOrchestrated = async (chatHistory: Array<{role: string; content: string}>, settings: ReturnType<typeof useSettings.getState>, chatModeValue: ChatMode) => {
     // Activate split view and reset streams
     setOrchActive(true);
     setOpusAnalysis({ agent: 'opus', content: '', status: 'running', label: 'Opus 4.6 — CTO Analysis' });
@@ -138,6 +151,7 @@ export function ChatPanel() {
           messages: chatHistory,
           anthropicKey: apiKey,
           openaiKey: settings.openaiKey,
+          chatMode: chatModeValue,
         }),
       });
 
@@ -152,6 +166,7 @@ export function ChatPanel() {
       }
       const decoder = new TextDecoder();
       let buffer = '';
+      let finalContent = '';
 
       while (true) {
         const { done, value } = await reader.read();
@@ -195,6 +210,9 @@ export function ChatPanel() {
               }
             } else if (event.type === 'done') {
               // Save to project
+              if (typeof event.content === 'string') {
+                finalContent = event.content;
+              }
               projects.save();
             } else if (event.type === 'error') {
               setOpusReview(prev => ({ ...prev, content: prev.content + `\n\n**Error:** ${event.message}`, status: 'error' }));
@@ -202,12 +220,22 @@ export function ChatPanel() {
           } catch { /* skip malformed */ }
         }
       }
+
+      if (finalContent.trim()) {
+        addMessage({
+          id: crypto.randomUUID(),
+          role: 'opus',
+          content: finalContent,
+          timestamp: Date.now(),
+          model: 'claude-opus-4-6',
+        });
+      }
     } catch (err: unknown) {
       setOpusReview(prev => ({ ...prev, content: `**Error:** ${err instanceof Error ? err.message : 'Unknown error'}`, status: 'error' }));
     }
   };
 
-  const sendDirect = async (chatHistory: Array<{role: string; content: string}>, settings: ReturnType<typeof useSettings.getState>) => {
+  const sendDirect = async (chatHistory: Array<{role: string; content: string}>, settings: ReturnType<typeof useSettings.getState>, systemPrompt: string) => {
     const modelInfo = MODELS.find(m => m.id === normalizedModel);
     const provider = modelInfo?.provider || 'anthropic';
     const assistantRole: AgentRole = provider === 'codex-cli' || provider === 'openai' ? 'codex' : normalizedModel.includes('haiku') ? 'haiku' : normalizedModel.includes('opus') ? 'opus' : 'sonnet';
@@ -232,6 +260,7 @@ export function ChatPanel() {
           await streamAnthropic({
             messages: chatHistory,
             model: normalizedModel,
+            systemPrompt,
             apiKey,
             signal: abort.signal,
             onToken,
@@ -240,6 +269,7 @@ export function ChatPanel() {
           await streamOpenAI({
             messages: chatHistory,
             model: provider === 'codex-cli' ? 'gpt-5.3-codex' : normalizedModel,
+            systemPrompt,
             apiKey: settings.openaiKey || apiKey,
             signal: abort.signal,
             onToken,
@@ -252,6 +282,7 @@ export function ChatPanel() {
           model: normalizedModel,
           apiKey,
           provider,
+          systemPrompt,
           openaiKey: settings.openaiKey,
           signal: abort.signal,
           onToken,
