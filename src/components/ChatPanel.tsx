@@ -90,8 +90,50 @@ export function ChatPanel() {
 
   const selectedModel = MODELS.find(m => m.id === normalizedModel) || MODELS[1];
 
+  // ── Chat commands (natural language shortcuts) ──
+  const tryHandleCommand = (text: string): boolean => {
+    const t = text.toLowerCase().trim();
+
+    // Preview commands
+    if (/^(avvia|lancia|apri|mostra|launch|open|show|start)\s*(l[' ]?)?\s*(anteprima|preview)/i.test(t) || t === 'preview') {
+      window.dispatchEvent(new CustomEvent('gc:show-preview'));
+      addMessage({ id: crypto.randomUUID(), role: 'system', content: '▶️ Preview avviata.', timestamp: Date.now() });
+      return true;
+    }
+    // Settings
+    if (/^(apri|open|show)\s*(le\s*)?\s*(impostazioni|settings)/i.test(t)) {
+      useSettings.getState().setOpen(true);
+      addMessage({ id: crypto.randomUUID(), role: 'system', content: '⚙️ Settings aperte.', timestamp: Date.now() });
+      return true;
+    }
+    // Terminal
+    if (/^(apri|open|show|mostra)\s*(il\s*)?\s*(terminale|terminal)/i.test(t)) {
+      window.dispatchEvent(new CustomEvent('gc:show-terminal'));
+      addMessage({ id: crypto.randomUUID(), role: 'system', content: '💻 Terminale aperto.', timestamp: Date.now() });
+      return true;
+    }
+    // Clear chat
+    if (/^(pulisci|clear|reset)\s*(la\s*)?\s*(chat|cronologia|history)/i.test(t)) {
+      clearMessages();
+      return true;
+    }
+    // New file
+    if (/^(nuovo|new|crea|create)\s*(file)/i.test(t)) {
+      window.dispatchEvent(new CustomEvent('gc:new-file'));
+      addMessage({ id: crypto.randomUUID(), role: 'system', content: '📄 Nuovo file creato.', timestamp: Date.now() });
+      return true;
+    }
+    return false;
+  };
+
   const sendMessage = async () => {
     if (!input.trim() || isStreaming) return;
+
+    // Check for quick commands first
+    if (tryHandleCommand(input.trim())) {
+      setInput('');
+      return;
+    }
 
     if (!apiKey) {
       useSettings.getState().setOpen(true);

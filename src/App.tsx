@@ -31,6 +31,7 @@ export function App() {
   const settingsOpen = useSettings((s) => s.isOpen);
   const showBottom = showTerminal || showPreview;
 
+  // Auto-preview when chat generates HTML
   useEffect(() => {
     if (isStreaming || messages.length === 0) return;
     const last = messages[messages.length - 1];
@@ -41,6 +42,18 @@ export function App() {
     if (!showPreview) setShowPreview(true);
     setBottomTab('preview');
   }, [messages, isStreaming, showPreview]);
+
+  // Chat command events
+  useEffect(() => {
+    const onShowPreview = () => { setShowPreview(true); setBottomTab('preview'); };
+    const onShowTerminal = () => { setShowTerminal(true); setBottomTab('terminal'); };
+    window.addEventListener('gc:show-preview', onShowPreview);
+    window.addEventListener('gc:show-terminal', onShowTerminal);
+    return () => {
+      window.removeEventListener('gc:show-preview', onShowPreview);
+      window.removeEventListener('gc:show-terminal', onShowTerminal);
+    };
+  }, []);
 
   return (
     <div className="h-screen w-screen flex flex-col bg-base text-text">
