@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useCallback } from 'react';
+import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { useChat, ChatMessage, AgentRole } from '../stores/chatStore';
 import { useSettings } from '../stores/settingsStore';
 import { useProjects } from '../stores/projectStore';
@@ -7,6 +7,7 @@ import { Send, Trash2, Zap, Bot, User, ChevronDown, FolderPlus, Folder, X, StopC
 import { isElectronApp, streamAnthropic, streamOpenAI, streamViaServer } from '../lib/directApi';
 import { openCodeInEditor } from '../lib/codeExtractor';
 import { withProjectContext, buildProjectContext } from '../lib/projectContext';
+import { MarkdownMessage } from './MarkdownMessage';
 
 type ChatMode = 'code' | 'ask';
 const ASK_SYSTEM_PROMPT = 'You are GiuseCoder, a helpful coding assistant. The user is in ASK mode — answer questions, explain concepts, review code, and provide guidance. Do NOT generate new code unless explicitly asked. Focus on clear explanations.';
@@ -62,10 +63,10 @@ export function ChatPanel() {
   });
 
   // Persist chatMode
-  const updateChatMode = (mode: ChatMode) => {
+  const updateChatMode = useCallback((mode: ChatMode) => {
     setChatMode(mode);
     localStorage.setItem('gc_chat_mode', mode);
-  };
+  }, []);
   const [newProjectName, setNewProjectName] = useState('');
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -108,13 +109,13 @@ export function ChatPanel() {
     }
   }, [showModelPicker, showProjectList]);
 
-  const normalizedModel = currentModel === 'gpt-5.2-codex'
-    ? 'gpt-5.2'
-    : currentModel === 'claude-sonnet-4-20250514'
-      ? 'claude-sonnet-4-5-20250929'
-      : currentModel;
+  const normalizedModel = useMemo(() =>
+    currentModel === 'gpt-5.2-codex' ? 'gpt-5.2'
+    : currentModel === 'claude-sonnet-4-20250514' ? 'claude-sonnet-4-5-20250929'
+    : currentModel
+  , [currentModel]);
 
-  const selectedModel = MODELS.find(m => m.id === normalizedModel) || MODELS[1];
+  const selectedModel = useMemo(() => MODELS.find(m => m.id === normalizedModel) || MODELS[1], [normalizedModel]);
 
   // ── Chat commands (natural language shortcuts) ──
   const tryHandleCommand = (text: string): boolean => {
@@ -203,11 +204,10 @@ export function ChatPanel() {
       return;
     }
     const systemPrompt = withProjectContext(chatMode === 'ask' ? ASK_SYSTEM_PROMPT : CODE_SYSTEM_PROMPT);
-    const rawHistory = [...messages, userMsg].filter(m => m.role === 'user' || ['haiku', 'sonnet', 'opus', 'codex'].includes(m.role)).map(m => ({
+    const chatHistory = [...messages, userMsg].filter(m => m.role === 'user' || ['haiku', 'sonnet', 'opus', 'codex'].includes(m.role)).map(m => ({
       role: m.role === 'user' ? 'user' : 'assistant',
       content: m.content,
     }));
-    const chatHistory = rawHistory;
 
     if (shouldRunOrchestrator) {
       await sendOrchestrated(chatHistory, settings, chatMode, userMsg.content);
@@ -525,9 +525,13 @@ export function ChatPanel() {
                 <span className="text-[10px] font-semibold text-muted">{roleLabels[msg.role]}</span>
                 {msg.model && <span className="text-[9px] text-muted/50">{msg.model}</span>}
               </div>
-              <div className="text-xs text-text/90 whitespace-pre-wrap break-words leading-relaxed">
-                {msg.content || (isStreaming && msg === messages[messages.length - 1] ? <span className="animate-pulse text-accent">...</span> : '')}
-              </div>
+              {msg.content ? (
+                <MarkdownMessage content={msg.content} />
+              ) : (
+                isStreaming && msg === messages[messages.length - 1]
+                  ? <span className="animate-pulse text-accent text-xs">...</span>
+                  : null
+              )}
             </div>
           ))}
           <div ref={messagesEndRef} />

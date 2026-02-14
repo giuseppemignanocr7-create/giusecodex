@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useState, useRef, useCallback, memo } from 'react';
 import { useFileStore, FileNode } from '../stores/fileStore';
 import { ChevronRight, ChevronDown, File, Folder, FolderOpen, RefreshCw, Upload } from 'lucide-react';
 import { isElectronApp } from '../lib/directApi';
@@ -51,8 +51,10 @@ async function fetchFileServer(path: string): Promise<string> {
   } catch { return ''; }
 }
 
-function TreeItem({ node, depth, onExpand }: { node: FileNode; depth: number; onExpand: (path: string) => void }) {
-  const { toggleDir, openFile, activeFile } = useFileStore();
+const TreeItem = memo(function TreeItem({ node, depth, onExpand }: { node: FileNode; depth: number; onExpand: (path: string) => void }) {
+  const toggleDir = useFileStore(s => s.toggleDir);
+  const openFile = useFileStore(s => s.openFile);
+  const activeFile = useFileStore(s => s.activeFile);
 
   const handleClick = async () => {
     if (node.type === 'directory') {
@@ -100,14 +102,14 @@ function TreeItem({ node, depth, onExpand }: { node: FileNode; depth: number; on
       ))}
     </div>
   );
-}
+});
 
 export function FileTree() {
   const { tree, setTree, projectPath, setProjectPath } = useFileStore();
   const [rootName, setRootName] = useState('');
   const rootHandleRef = useRef<FileSystemDirectoryHandle | null>(null);
 
-  const handleOpenFolder = async () => {
+  const handleOpenFolder = useCallback(async () => {
     try {
       if ('showDirectoryPicker' in window) {
         // File System Access API (Electron + Chrome/Edge)
@@ -134,9 +136,10 @@ export function FileTree() {
         console.error('Failed to open folder:', err);
       }
     }
-  };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [setTree, setProjectPath]);
 
-  const handleExpand = async (path: string) => {
+  const handleExpand = useCallback(async (path: string) => {
     const children = await expandDir(path);
     if (children.length === 0) return;
     const updateChildren = (nodes: FileNode[]): FileNode[] =>
@@ -145,20 +148,23 @@ export function FileTree() {
         if (n.children) return { ...n, children: updateChildren(n.children) };
         return n;
       });
-    setTree(updateChildren(tree));
-  };
+    const currentTree = useFileStore.getState().tree;
+    setTree(updateChildren(currentTree));
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [setTree]);
 
-  const handleRefresh = async () => {
+  const handleRefresh = useCallback(async () => {
     if (rootHandleRef.current) {
       handleMap.clear();
       handleMap.set('', rootHandleRef.current);
       const children = await readDirHandle(rootHandleRef.current, '');
       setTree(children);
     } else if (projectPath) {
-      const data = await fetchTreeServer(projectPath);
+      const currentPath = useFileStore.getState().projectPath;
+      const data = await fetchTreeServer(currentPath);
       setTree(data);
     }
-  };
+  }, [setTree]);
 
   useEffect(() => {
     const onOpenFolder = () => { void handleOpenFolder(); };

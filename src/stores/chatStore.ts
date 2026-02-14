@@ -37,6 +37,25 @@ interface ChatStore {
   clearMessages: () => void;
 }
 
+// Token batching: accumulate tokens and flush once per animation frame
+let _tokenBuffer = '';
+let _rafId: number | null = null;
+
+function flushTokenBuffer(set: (fn: (s: ChatStore) => Partial<ChatStore>) => void) {
+  if (!_tokenBuffer) return;
+  const text = _tokenBuffer;
+  _tokenBuffer = '';
+  _rafId = null;
+  set((s) => {
+    const msgs = [...s.messages];
+    if (msgs.length > 0) {
+      const last = msgs[msgs.length - 1];
+      msgs[msgs.length - 1] = { ...last, content: last.content + text };
+    }
+    return { messages: msgs };
+  });
+}
+
 export const useChat = create<ChatStore>()(
   persist(
     (set) => ({
@@ -47,18 +66,24 @@ export const useChat = create<ChatStore>()(
       pipeline: [],
       totalCost: 0,
 
-      addMessage: (msg) => set((s) => ({ messages: [...s.messages, msg] })),
+      addMessage: (msg) => {
+        // Flush any pending tokens before adding a new message
+        if (_tokenBuffer) flushTokenBuffer(set);
+        set((s) => ({ messages: [...s.messages, msg] }));
+      },
 
-      appendToLast: (text) =>
-        set((s) => {
-          const msgs = [...s.messages];
-          if (msgs.length > 0) {
-            msgs[msgs.length - 1] = { ...msgs[msgs.length - 1], content: msgs[msgs.length - 1].content + text };
-          }
-          return { messages: msgs };
-        }),
+      appendToLast: (text) => {
+        _tokenBuffer += text;
+        if (_rafId === null) {
+          _rafId = requestAnimationFrame(() => flushTokenBuffer(set));
+        }
+      },
 
-      setStreaming: (v) => set({ isStreaming: v }),
+      setStreaming: (v) => {
+        // Flush remaining tokens when streaming stops
+        if (!v && _tokenBuffer) flushTokenBuffer(set);
+        set({ isStreaming: v });
+      },
       setModel: (m) => set({ currentModel: m }),
       setApiKey: (k) => set({ apiKey: k }),
       setPipeline: (p) => set({ pipeline: p }),
@@ -71,13 +96,17 @@ export const useChat = create<ChatStore>()(
         }),
 
       addCost: (c) => set((s) => ({ totalCost: s.totalCost + c })),
-      clearMessages: () => set({ messages: [], pipeline: [] }),
+      clearMessages: () => {
+        _tokenBuffer = '';
+        if (_rafId !== null) { cancelAnimationFrame(_rafId); _rafId = null; }
+        set({ messages: [], pipeline: [] });
+      },
     }),
     {
       name: 'gc_chat_store',
       storage: createJSONStorage(() => localStorage),
       partialize: (state) => ({
-        messages: state.messages.slice(-200),
+        messages: state.messages.slice(-50),
         currentModel: state.currentModel,
         totalCost: state.totalCost,
       }),

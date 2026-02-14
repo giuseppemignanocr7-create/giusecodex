@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { PanelGroup, Panel, PanelResizeHandle } from 'react-resizable-panels';
 import { FileTree } from './components/FileTree';
 import { EditorTabs } from './components/EditorTabs';
@@ -9,6 +9,7 @@ import { Toolbar } from './components/Toolbar';
 import { SettingsPanel } from './components/SettingsPanel';
 import { useSettings } from './stores/settingsStore';
 import { useChat } from './stores/chatStore';
+import { useFileStore } from './stores/fileStore';
 import { Terminal as TerminalIcon, Globe } from 'lucide-react';
 
 function containsPreviewableHtml(content: string): boolean {
@@ -30,6 +31,27 @@ export function App() {
 
   const settingsOpen = useSettings((s) => s.isOpen);
   const showBottom = showTerminal || showPreview;
+
+  // Global keyboard shortcuts
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      // Skip when typing in input/textarea
+      const tag = (e.target as HTMLElement)?.tagName;
+      const isInput = tag === 'INPUT' || tag === 'TEXTAREA';
+
+      if (e.ctrlKey && e.key === 'b') { e.preventDefault(); setShowFiles(p => !p); }
+      else if (e.ctrlKey && e.key === 'j') { e.preventDefault(); setShowTerminal(p => !p); }
+      else if (e.ctrlKey && e.shiftKey && e.key === 'P') { e.preventDefault(); setShowPreview(p => !p); }
+      else if (e.ctrlKey && e.key === 'l' && !isInput) { e.preventDefault(); window.dispatchEvent(new CustomEvent('gc:focus-chat-input')); }
+      else if (e.ctrlKey && e.key === 'w' && !isInput) {
+        e.preventDefault();
+        const { activeFile, closeFile } = useFileStore.getState();
+        if (activeFile) closeFile(activeFile);
+      }
+    };
+    document.addEventListener('keydown', onKeyDown);
+    return () => document.removeEventListener('keydown', onKeyDown);
+  }, []);
 
   // Auto-preview when chat generates HTML
   useEffect(() => {
