@@ -15,7 +15,7 @@ When modifying code, output the complete changed code with file paths.
 Be concise and direct. Use markdown with code blocks.`;
 
 // Detect if running in Electron (has Codex CLI for GPT 5.3)
-const isElectron = typeof window !== 'undefined' && (window as any).giuseCoder?.isElectron;
+const isElectron = typeof window !== 'undefined' && !!(window as any).giuseCoder?.isElectron;
 
 const MODELS = [
   { id: 'claude-opus-4-6', label: 'Opus 4.6', desc: 'CTO reasoning', color: 'text-purple', provider: 'anthropic' },
@@ -94,33 +94,38 @@ export function ChatPanel() {
   const tryHandleCommand = (text: string): boolean => {
     const t = text.toLowerCase().trim();
 
-    // Preview commands
-    if (/^(avvia|lancia|apri|mostra|launch|open|show|start)\s*(l[' ]?)?\s*(anteprima|preview)/i.test(t) || t === 'preview') {
+    // Preview commands (IT: avvia/lancia/apri/mostra l'anteprima, EN: launch/open/show the preview)
+    if (/^(avvia|lancia|apri|mostra|launch|open|show|start)\s*(l[' ]?|la\s|the\s|il\s|a\s)?\s*(anteprima|preview)/i.test(t) || t === 'preview' || t === 'anteprima') {
       window.dispatchEvent(new CustomEvent('gc:show-preview'));
       addMessage({ id: crypto.randomUUID(), role: 'system', content: '▶️ Preview avviata.', timestamp: Date.now() });
       return true;
     }
     // Settings
-    if (/^(apri|open|show)\s*(le\s*)?\s*(impostazioni|settings)/i.test(t)) {
+    if (/^(apri|open|show)\s*(le\s*|the\s*)?\s*(impostazioni|settings)/i.test(t)) {
       useSettings.getState().setOpen(true);
       addMessage({ id: crypto.randomUUID(), role: 'system', content: '⚙️ Settings aperte.', timestamp: Date.now() });
       return true;
     }
     // Terminal
-    if (/^(apri|open|show|mostra)\s*(il\s*)?\s*(terminale|terminal)/i.test(t)) {
+    if (/^(apri|open|show|mostra)\s*(il\s*|the\s*)?\s*(terminale|terminal)/i.test(t)) {
       window.dispatchEvent(new CustomEvent('gc:show-terminal'));
       addMessage({ id: crypto.randomUUID(), role: 'system', content: '💻 Terminale aperto.', timestamp: Date.now() });
       return true;
     }
     // Clear chat
-    if (/^(pulisci|clear|reset)\s*(la\s*)?\s*(chat|cronologia|history)/i.test(t)) {
+    if (/^(pulisci|clear|reset)\s*(la\s*|the\s*)?\s*(chat|cronologia|history)/i.test(t)) {
       clearMessages();
       return true;
     }
     // New file
-    if (/^(nuovo|new|crea|create)\s*(file)/i.test(t)) {
+    if (/^(nuovo|new|crea|create)\s*(un\s*)?\s*(file)/i.test(t)) {
       window.dispatchEvent(new CustomEvent('gc:new-file'));
       addMessage({ id: crypto.randomUUID(), role: 'system', content: '📄 Nuovo file creato.', timestamp: Date.now() });
+      return true;
+    }
+    // Help / list commands
+    if (/^(help|aiuto|comandi|commands)$/i.test(t)) {
+      addMessage({ id: crypto.randomUUID(), role: 'system', content: '**Comandi disponibili:**\n- `avvia anteprima` / `launch preview`\n- `apri impostazioni` / `open settings`\n- `apri terminale` / `open terminal`\n- `pulisci chat` / `clear chat`\n- `nuovo file` / `new file`\n- `help` / `aiuto`', timestamp: Date.now() });
       return true;
     }
     return false;
@@ -136,6 +141,15 @@ export function ChatPanel() {
     }
 
     if (!apiKey) {
+      useSettings.getState().setOpen(true);
+      return;
+    }
+
+    // Warn if OpenAI model selected without OpenAI key
+    const selectedModelInfo = MODELS.find(m => m.id === normalizedModel);
+    if (selectedModelInfo?.provider === 'openai' && !useSettings.getState().openaiKey) {
+      addMessage({ id: crypto.randomUUID(), role: 'system', content: '⚠️ **OpenAI API key mancante.** Vai in Settings (⚙️) e inserisci la tua OpenAI key per usare GPT 5.2.', timestamp: Date.now() });
+      setInput('');
       useSettings.getState().setOpen(true);
       return;
     }
@@ -193,6 +207,9 @@ export function ChatPanel() {
     setCodexStream({ agent: 'codex', content: '', status: 'idle', label: isLocalhost ? 'GPT 5.3 Codex — Code' : 'GPT 5.2 — Code' });
     setOpusReview({ agent: 'opus', content: '', status: 'idle', label: 'Opus 4.6 — Final Review' });
 
+    const abort = new AbortController();
+    abortRef.current = abort;
+
     try {
       const res = await fetch('/api/chat/orchestrate', {
         method: 'POST',
@@ -203,6 +220,7 @@ export function ChatPanel() {
           openaiKey: settings.openaiKey,
           chatMode: chatModeValue,
         }),
+        signal: abort.signal,
       });
 
       if (!res.ok) {
@@ -253,11 +271,10 @@ export function ChatPanel() {
                 accCodex += event.text;
                 setCodexStream(prev => ({ ...prev, content: prev.content + event.text }));
               } else if (event.agent === 'opus') {
+                // Track review phase via a local flag based on step events
+                accReview += event.text;
                 setOpusReview(prev => {
-                  if (prev.status === 'running') {
-                    accReview += event.text;
-                    return { ...prev, content: prev.content + event.text };
-                  }
+                  if (prev.status === 'running') return { ...prev, content: prev.content + event.text };
                   return prev;
                 });
                 setOpusAnalysis(prev => {
@@ -295,7 +312,11 @@ export function ChatPanel() {
         if (accSonnet.trim()) openCodeInEditor(accSonnet);
       }
     } catch (err: unknown) {
-      setOpusReview(prev => ({ ...prev, content: `**Error:** ${err instanceof Error ? err.message : 'Unknown error'}`, status: 'error' }));
+      if (err instanceof Error && err.name === 'AbortError') {
+        setOpusReview(prev => ({ ...prev, content: prev.content + '\n\n*[Stopped]*', status: 'error' }));
+      } else {
+        setOpusReview(prev => ({ ...prev, content: `**Error:** ${err instanceof Error ? err.message : 'Unknown error'}`, status: 'error' }));
+      }
     }
   };
 

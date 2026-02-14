@@ -22,6 +22,16 @@ function extractHtmlFromMessages(messages: Array<{ content: string }>): string |
     // Match full HTML documents
     const docMatch = content.match(/(<(!DOCTYPE|html)[\s\S]*<\/html>)/i);
     if (docMatch) return docMatch[1].trim();
+    // Match partial HTML with body/div/script tags
+    const partialMatch = content.match(/(<(body|head|div|section|main)[\s\S]*<\/(body|div|section|main|script)>)/i);
+    if (partialMatch) {
+      const html = partialMatch[1].trim();
+      // Wrap in basic HTML document if needed
+      if (!html.toLowerCase().includes('<html')) {
+        return `<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head><body>${html}</body></html>`;
+      }
+      return html;
+    }
   }
   return null;
 }

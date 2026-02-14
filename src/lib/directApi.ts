@@ -1,7 +1,7 @@
 // Direct API calls for Electron mode (no server needed)
 // When loaded from file://, we call Anthropic/OpenAI APIs directly
 
-export const isElectronApp = typeof window !== 'undefined' && window.location.protocol === 'file:';
+export const isElectronApp = typeof window !== 'undefined' && !!(window as any).giuseCoder?.isElectron;
 
 // ──── Anthropic Streaming ────
 export async function streamAnthropic(params: {
