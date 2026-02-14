@@ -7,7 +7,7 @@ const isElectron = typeof window !== 'undefined' && (window as any).giuseCoder?.
 
 const MODELS = [
   { id: 'claude-opus-4-6', label: 'Opus 4.6', desc: 'CTO reasoning — Anthropic API key', color: 'bg-purple' },
-  { id: 'claude-sonnet-4-20250514', label: 'Sonnet 4', desc: 'UI/design — Anthropic API key', color: 'bg-accent' },
+  { id: 'claude-sonnet-4-5-20250929', label: 'Sonnet 4.5', desc: 'UI/design — Anthropic API key', color: 'bg-accent' },
   { id: 'claude-haiku-4-5-20251001', label: 'Haiku 4.5', desc: 'Fast triage — Anthropic API key', color: 'bg-green' },
   ...(isElectron ? [{ id: 'gpt-5.3-codex', label: 'GPT 5.3 Codex', desc: 'Code gen — Local Codex CLI', color: 'bg-yellow' }] : []),
   { id: 'gpt-5.2-codex', label: 'GPT 5.2 Codex', desc: 'Best code agent — OpenAI API key', color: 'bg-yellow' },

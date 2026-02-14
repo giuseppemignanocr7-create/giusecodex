@@ -1,7 +1,10 @@
-import { useState, useRef, useCallback } from 'react';
-import { RefreshCw, ExternalLink, Globe, Monitor, Tablet, Smartphone, Maximize2 } from 'lucide-react';
+import { useState, useRef, useCallback, useEffect, useMemo } from 'react';
+import { RefreshCw, ExternalLink, Globe, Monitor, Tablet, Smartphone, Maximize2, Play, Link } from 'lucide-react';
+import { useFileStore } from '../stores/fileStore';
+import { useChat } from '../stores/chatStore';
 
 type DeviceMode = 'desktop' | 'tablet' | 'mobile';
+type PreviewMode = 'auto' | 'url';
 
 const DEVICES: { mode: DeviceMode; label: string; width: number; height: number; icon: typeof Monitor }[] = [
   { mode: 'desktop', label: 'Desktop', width: 1440, height: 900, icon: Monitor },
@@ -9,40 +12,113 @@ const DEVICES: { mode: DeviceMode; label: string; width: number; height: number;
   { mode: 'mobile', label: 'Mobile', width: 375, height: 812, icon: Smartphone },
 ];
 
+// Extract HTML from code blocks in chat messages
+function extractHtmlFromMessages(messages: Array<{ content: string }>): string | null {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const content = messages[i].content;
+    // Match ```html ... ``` code blocks
+    const htmlMatch = content.match(/```html\s*\n([\s\S]*?)```/);
+    if (htmlMatch) return htmlMatch[1].trim();
+    // Match full HTML documents
+    const docMatch = content.match(/(<(!DOCTYPE|html)[\s\S]*<\/html>)/i);
+    if (docMatch) return docMatch[1].trim();
+  }
+  return null;
+}
+
+// Build a full HTML document from open files (html + css + js)
+function buildFromOpenFiles(files: Array<{ name: string; content: string }>): string | null {
+  const htmlFile = files.find(f => f.name.endsWith('.html'));
+  if (!htmlFile) return null;
+  let html = htmlFile.content;
+  const cssFile = files.find(f => f.name.endsWith('.css'));
+  const jsFile = files.find(f => f.name.endsWith('.js') && !f.name.endsWith('.config.js'));
+  if (cssFile && !html.includes(cssFile.name)) {
+    html = html.replace('</head>', `<style>\n${cssFile.content}\n</style>\n</head>`);
+  }
+  if (jsFile && !html.includes(jsFile.name)) {
+    html = html.replace('</body>', `<script>\n${jsFile.content}\n</script>\n</body>`);
+  }
+  return html;
+}
+
 export function PreviewPanel() {
   const [url, setUrl] = useState('');
   const [device, setDevice] = useState<DeviceMode>('desktop');
+  const [previewMode, setPreviewMode] = useState<PreviewMode>('auto');
   const iframeRef = useRef<HTMLIFrameElement>(null);
+  const openFiles = useFileStore(s => s.openFiles);
+  const chatMessages = useChat(s => s.messages);
+
+  // Auto-generate preview content from open files or chat
+  const autoContent = useMemo(() => {
+    // First try open files
+    const fromFiles = buildFromOpenFiles(openFiles);
+    if (fromFiles) return fromFiles;
+    // Then try chat messages
+    const fromChat = extractHtmlFromMessages(chatMessages);
+    if (fromChat) return fromChat;
+    return null;
+  }, [openFiles, chatMessages]);
+
+  const hasContent = previewMode === 'auto' ? !!autoContent : !!url;
 
   const refresh = () => {
     if (iframeRef.current) {
-      iframeRef.current.src = iframeRef.current.src;
+      if (previewMode === 'url') {
+        iframeRef.current.src = iframeRef.current.src;
+      } else {
+        // Force re-render srcdoc
+        const el = iframeRef.current;
+        const doc = el.srcdoc;
+        el.srcdoc = '';
+        requestAnimationFrame(() => { el.srcdoc = doc; });
+      }
     }
   };
 
   const openInNewWindow = useCallback(() => {
-    if (!url) return;
-    const deviceInfo = DEVICES.find(d => d.mode === device) || DEVICES[0];
-    const w = device === 'desktop' ? screen.availWidth : deviceInfo.width + 40;
-    const h = device === 'desktop' ? screen.availHeight : deviceInfo.height + 80;
-    const left = Math.round((screen.availWidth - w) / 2);
-    const top = Math.round((screen.availHeight - h) / 2);
-    window.open(
-      url,
-      'GiuseCoder Preview',
-      `width=${w},height=${h},left=${left},top=${top},menubar=no,toolbar=no,location=yes,status=no,resizable=yes`
-    );
-  }, [url, device]);
+    if (previewMode === 'url' && url) {
+      window.open(url, 'GiuseCoder Preview', 'width=800,height=900');
+    } else if (autoContent) {
+      const win = window.open('', 'GiuseCoder Preview', 'width=800,height=900');
+      if (win) { win.document.write(autoContent); win.document.close(); }
+    }
+  }, [url, autoContent, previewMode]);
 
   const currentDevice = DEVICES.find(d => d.mode === device) || DEVICES[0];
 
   return (
     <div className="h-full flex flex-col bg-surface">
       {/* Header */}
-      <div className="flex items-center gap-2 px-3 py-2 border-b border-base shrink-0">
-        <Globe className="w-4 h-4 text-accent" />
-        <span className="text-xs font-semibold text-muted uppercase tracking-wider">Preview</span>
+      <div className="flex items-center gap-1.5 px-3 py-1.5 border-b border-base shrink-0">
+        <Globe className="w-3.5 h-3.5 text-accent" />
+        <span className="text-[10px] font-semibold text-muted uppercase tracking-wider">Preview</span>
         <div className="flex-1" />
+
+        {/* Auto / URL toggle */}
+        <div className="flex items-center bg-overlay rounded p-0.5 gap-0.5 mr-1">
+          <button
+            onClick={() => setPreviewMode('auto')}
+            className={`flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-medium transition-colors ${
+              previewMode === 'auto' ? 'bg-accent/20 text-accent' : 'text-muted hover:text-text'
+            }`}
+            title="Auto preview — renders code from editor/chat"
+          >
+            <Play className="w-3 h-3" />
+            Auto
+          </button>
+          <button
+            onClick={() => setPreviewMode('url')}
+            className={`flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-medium transition-colors ${
+              previewMode === 'url' ? 'bg-accent/20 text-accent' : 'text-muted hover:text-text'
+            }`}
+            title="URL preview — load external URL"
+          >
+            <Link className="w-3 h-3" />
+            URL
+          </button>
+        </div>
 
         {/* Device switcher */}
         <div className="flex items-center bg-overlay rounded p-0.5 gap-0.5">
@@ -52,59 +128,45 @@ export function PreviewPanel() {
               <button
                 key={d.mode}
                 onClick={() => setDevice(d.mode)}
-                className={`p-1 rounded transition-colors ${
-                  device === d.mode
-                    ? 'bg-accent/20 text-accent'
-                    : 'text-muted hover:text-text hover:bg-surface'
+                className={`p-0.5 rounded transition-colors ${
+                  device === d.mode ? 'bg-accent/20 text-accent' : 'text-muted hover:text-text hover:bg-surface'
                 }`}
                 title={`${d.label} (${d.width}×${d.height})`}
               >
-                <Icon className="w-3.5 h-3.5" />
+                <Icon className="w-3 h-3" />
               </button>
             );
           })}
         </div>
 
-        <div className="w-px h-4 bg-base" />
-
-        <button onClick={refresh} className="p-1 text-muted hover:text-text rounded hover:bg-overlay" title="Refresh">
-          <RefreshCw className="w-3.5 h-3.5" />
+        <button onClick={refresh} className="p-0.5 text-muted hover:text-text rounded hover:bg-overlay" title="Refresh">
+          <RefreshCw className="w-3 h-3" />
         </button>
-        <button onClick={openInNewWindow} className="p-1 text-muted hover:text-text rounded hover:bg-overlay" title="Open in new window">
-          <Maximize2 className="w-3.5 h-3.5" />
+        <button onClick={openInNewWindow} className="p-0.5 text-muted hover:text-text rounded hover:bg-overlay" title="Open in new window">
+          <Maximize2 className="w-3 h-3" />
         </button>
-        {url && (
-          <a href={url} target="_blank" rel="noopener" className="p-1 text-muted hover:text-text rounded hover:bg-overlay" title="Open in browser tab">
-            <ExternalLink className="w-3.5 h-3.5" />
-          </a>
-        )}
       </div>
 
-      {/* URL bar */}
-      <div className="px-2 py-1 border-b border-base shrink-0 flex items-center gap-2">
-        <input
-          type="text"
-          value={url}
-          onChange={e => setUrl(e.target.value)}
-          placeholder="http://localhost:3000"
-          className="flex-1 bg-overlay border border-base rounded px-2 py-1 text-[11px] text-text placeholder:text-muted/50 focus:outline-none focus:border-accent/50"
-          onKeyDown={e => { if (e.key === 'Enter' && iframeRef.current) iframeRef.current.src = url; }}
-        />
-        {url && (
-          <span className="text-[9px] text-muted shrink-0">
-            {currentDevice.label} {device !== 'desktop' && `${currentDevice.width}×${currentDevice.height}`}
-          </span>
-        )}
-      </div>
+      {/* URL bar (only in URL mode) */}
+      {previewMode === 'url' && (
+        <div className="px-2 py-1 border-b border-base shrink-0">
+          <input
+            type="text"
+            value={url}
+            onChange={e => setUrl(e.target.value)}
+            placeholder="http://localhost:3000"
+            className="w-full bg-overlay border border-base rounded px-2 py-1 text-[11px] text-text placeholder:text-muted/50 focus:outline-none focus:border-accent/50"
+            onKeyDown={e => { if (e.key === 'Enter' && iframeRef.current) iframeRef.current.src = url; }}
+          />
+        </div>
+      )}
 
       {/* Preview area */}
       <div className="flex-1 overflow-hidden flex items-center justify-center bg-base">
-        {url ? (
+        {hasContent ? (
           <div
             className={`bg-white overflow-hidden transition-all duration-300 ${
-              device === 'desktop'
-                ? 'w-full h-full'
-                : 'rounded-2xl shadow-2xl border-4 border-gray-800'
+              device === 'desktop' ? 'w-full h-full' : 'rounded-2xl shadow-2xl border-4 border-gray-800'
             }`}
             style={device !== 'desktop' ? {
               width: `${currentDevice.width}px`,
@@ -113,32 +175,40 @@ export function PreviewPanel() {
               maxHeight: '100%',
             } : undefined}
           >
-            {/* Device notch for mobile */}
             {device === 'mobile' && (
-              <div className="h-6 bg-gray-800 flex items-center justify-center">
-                <div className="w-20 h-4 bg-gray-900 rounded-b-xl" />
+              <div className="h-5 bg-gray-800 flex items-center justify-center">
+                <div className="w-16 h-3 bg-gray-900 rounded-b-lg" />
               </div>
             )}
-            {/* Device camera bar for tablet */}
             {device === 'tablet' && (
-              <div className="h-4 bg-gray-800 flex items-center justify-center">
+              <div className="h-3 bg-gray-800 flex items-center justify-center">
                 <div className="w-2 h-2 bg-gray-600 rounded-full" />
               </div>
             )}
             <iframe
               ref={iframeRef}
-              src={url}
+              src={previewMode === 'url' ? url : undefined}
+              srcDoc={previewMode === 'auto' ? (autoContent || '') : undefined}
               className="w-full border-0"
-              style={{ height: device === 'mobile' ? 'calc(100% - 24px)' : device === 'tablet' ? 'calc(100% - 16px)' : '100%' }}
+              style={{ height: device === 'mobile' ? 'calc(100% - 20px)' : device === 'tablet' ? 'calc(100% - 12px)' : '100%' }}
               title="Preview"
               sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
             />
           </div>
         ) : (
-          <div className="text-center">
-            <Globe className="w-8 h-8 text-muted/20 mx-auto mb-2" />
-            <p className="text-muted text-xs">Enter a URL to preview</p>
-            <p className="text-muted/50 text-[10px] mt-1">e.g. http://localhost:3000</p>
+          <div className="text-center px-4">
+            <Globe className="w-6 h-6 text-muted/20 mx-auto mb-2" />
+            {previewMode === 'auto' ? (
+              <>
+                <p className="text-muted text-[11px]">Auto preview is active</p>
+                <p className="text-muted/50 text-[10px] mt-1">Open an HTML file or ask the AI to generate a page</p>
+              </>
+            ) : (
+              <>
+                <p className="text-muted text-[11px]">Enter a URL to preview</p>
+                <p className="text-muted/50 text-[10px] mt-1">e.g. http://localhost:3000</p>
+              </>
+            )}
           </div>
         )}
       </div>

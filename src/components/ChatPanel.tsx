@@ -14,7 +14,7 @@ const isElectron = typeof window !== 'undefined' && (window as any).giuseCoder?.
 
 const MODELS = [
   { id: 'claude-opus-4-6', label: 'Opus 4.6', desc: 'CTO reasoning', color: 'text-purple', provider: 'anthropic' },
-  { id: 'claude-sonnet-4-20250514', label: 'Sonnet 4', desc: 'Balanced', color: 'text-accent', provider: 'anthropic' },
+  { id: 'claude-sonnet-4-5-20250929', label: 'Sonnet 4.5', desc: 'UI/Design', color: 'text-accent', provider: 'anthropic' },
   { id: 'claude-haiku-4-5-20251001', label: 'Haiku 4.5', desc: 'Fast', color: 'text-green', provider: 'anthropic' },
   ...(isElectron ? [{ id: 'gpt-5.3-codex', label: 'GPT 5.3 Codex', desc: 'Local CLI', color: 'text-yellow', provider: 'codex-cli' as const }] : []),
   { id: 'gpt-5.2-codex', label: 'GPT 5.2 Codex', desc: 'Best code via API', color: 'text-yellow', provider: 'openai' },
@@ -56,7 +56,7 @@ export function ChatPanel() {
   // Orchestrator split view state
   const [orchActive, setOrchActive] = useState(false);
   const [opusAnalysis, setOpusAnalysis] = useState<AgentStream>({ ...defaultStream(), agent: 'opus', label: 'Opus 4.6 — CTO Analysis' });
-  const [sonnetStream, setSonnetStream] = useState<AgentStream>({ ...defaultStream(), agent: 'sonnet', label: 'Sonnet 4 — UI/Design' });
+  const [sonnetStream, setSonnetStream] = useState<AgentStream>({ ...defaultStream(), agent: 'sonnet', label: 'Sonnet 4.5 — UI/Design' });
   const [codexStream, setCodexStream] = useState<AgentStream>({ ...defaultStream(), agent: 'codex', label: 'GPT 5.3 Codex — Code' });
   const [opusReview, setOpusReview] = useState<AgentStream>({ ...defaultStream(), agent: 'opus', label: 'Opus 4.6 — Final Review' });
 
