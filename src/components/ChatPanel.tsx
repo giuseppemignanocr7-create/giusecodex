@@ -5,6 +5,7 @@ import { useProjects } from '../stores/projectStore';
 import { OrchestratorView, AgentStream } from './OrchestratorView';
 import { Send, Trash2, Zap, Bot, User, ChevronDown, FolderPlus, Folder, X, StopCircle, MessageCircle, Code2 } from 'lucide-react';
 import { isElectronApp, streamAnthropic, streamOpenAI, streamViaServer } from '../lib/directApi';
+import { openCodeInEditor } from '../lib/codeExtractor';
 
 type ChatMode = 'code' | 'ask';
 const ASK_SYSTEM_PROMPT = 'You are GiuseCoder, a helpful coding assistant. The user is in ASK mode — answer questions, explain concepts, review code, and provide guidance. Do NOT generate new code unless explicitly asked. Focus on clear explanations.';
@@ -121,6 +122,12 @@ export function ChatPanel() {
       await sendOrchestrated(chatHistory, settings, chatMode);
     } else {
       await sendDirect(chatHistory, settings, systemPrompt);
+      // Auto-open generated code in editor from direct mode response
+      const lastMsg = useChat.getState().messages;
+      const last = lastMsg[lastMsg.length - 1];
+      if (last && last.role !== 'user' && chatMode === 'code') {
+        openCodeInEditor(last.content);
+      }
     }
 
     setStreaming(false);
@@ -231,6 +238,8 @@ export function ChatPanel() {
           timestamp: Date.now(),
           model: 'claude-opus-4-6',
         });
+        // Auto-open generated code in editor
+        openCodeInEditor(finalContent);
       }
     } catch (err: unknown) {
       setOpusReview(prev => ({ ...prev, content: `**Error:** ${err instanceof Error ? err.message : 'Unknown error'}`, status: 'error' }));
