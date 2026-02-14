@@ -210,14 +210,14 @@ export function ChatPanel() {
     const chatHistory = rawHistory;
 
     if (shouldRunOrchestrator) {
-      await sendOrchestrated(chatHistory, settings, chatMode);
+      await sendOrchestrated(chatHistory, settings, chatMode, userMsg.content);
     } else {
       await sendDirect(chatHistory, settings, systemPrompt);
       // Auto-open generated code in editor from direct mode response
       const lastMsg = useChat.getState().messages;
       const last = lastMsg[lastMsg.length - 1];
       if (last && last.role !== 'user' && chatMode === 'code') {
-        openCodeInEditor(last.content);
+        openCodeInEditor(last.content, userMsg.content);
       }
     }
 
@@ -233,7 +233,7 @@ export function ChatPanel() {
     }
   };
 
-  const sendOrchestrated = async (chatHistory: Array<{role: string; content: string}>, settings: ReturnType<typeof useSettings.getState>, chatModeValue: ChatMode) => {
+  const sendOrchestrated = async (chatHistory: Array<{role: string; content: string}>, settings: ReturnType<typeof useSettings.getState>, chatModeValue: ChatMode, userRequest?: string) => {
     // Activate split view and reset streams
     setOrchActive(true);
     setOpusAnalysis({ agent: 'opus', content: '', status: 'running', label: 'Opus 4.6 — CTO Analysis' });
@@ -343,10 +343,10 @@ export function ChatPanel() {
           timestamp: Date.now(),
           model: 'claude-opus-4-6',
         });
-        // Open code in editor from all sources (try each until one works)
-        openCodeInEditor(bestContent);
-        if (accCodex.trim()) openCodeInEditor(accCodex);
-        if (accSonnet.trim()) openCodeInEditor(accSonnet);
+        // Open code in editor as a proper project folder
+        openCodeInEditor(bestContent, userRequest);
+        if (accCodex.trim() && accCodex.trim() !== bestContent.trim()) openCodeInEditor(accCodex, userRequest);
+        if (accSonnet.trim() && accSonnet.trim() !== bestContent.trim()) openCodeInEditor(accSonnet, userRequest);
       }
     } catch (err: unknown) {
       if (err instanceof Error && err.name === 'AbortError') {

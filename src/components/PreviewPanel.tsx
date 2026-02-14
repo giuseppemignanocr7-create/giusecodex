@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback, useMemo } from 'react';
+import { useState, useRef, useCallback, useMemo, useEffect } from 'react';
 import { RefreshCw, Globe, Monitor, Tablet, Smartphone, Maximize2, Play, Link } from 'lucide-react';
 import { useFileStore } from '../stores/fileStore';
 import { useChat } from '../stores/chatStore';
@@ -37,18 +37,38 @@ function extractHtmlFromMessages(messages: Array<{ content: string }>): string |
 }
 
 // Build a full HTML document from open files (html + css + js)
-function buildFromOpenFiles(files: Array<{ name: string; content: string }>): string | null {
-  const htmlFile = files.find(f => f.name.endsWith('.html'));
+// Groups files by project folder and combines them
+function buildFromOpenFiles(files: Array<{ path: string; name: string; content: string }>, activeFile: string | null): string | null {
+  // Find the project folder of the active file (or any HTML file)
+  const activeFolder = activeFile ? activeFile.split('/').slice(0, -1).join('/') : '';
+
+  // Prefer HTML file from the active folder, then any HTML file
+  let htmlFile = files.find(f => f.name.endsWith('.html') && f.path.startsWith(activeFolder + '/'));
+  if (!htmlFile) htmlFile = files.find(f => f.name === 'index.html');
+  if (!htmlFile) htmlFile = files.find(f => f.name.endsWith('.html'));
   if (!htmlFile) return null;
+
+  const folder = htmlFile.path.split('/').slice(0, -1).join('/');
   let html = htmlFile.content;
-  const cssFile = files.find(f => f.name.endsWith('.css'));
-  const jsFile = files.find(f => f.name.endsWith('.js') && !f.name.endsWith('.config.js'));
-  if (cssFile && !html.includes(cssFile.name)) {
-    html = html.replace('</head>', `<style>\n${cssFile.content}\n</style>\n</head>`);
+
+  // Collect all CSS files from the same folder
+  const cssFiles = files.filter(f => f.name.endsWith('.css') && f.path.startsWith(folder + '/'));
+  for (const css of cssFiles) {
+    if (!html.includes(css.name)) {
+      const insertPoint = html.includes('</head>') ? '</head>' : '</html>';
+      html = html.replace(insertPoint, `<style>\n${css.content}\n</style>\n${insertPoint}`);
+    }
   }
-  if (jsFile && !html.includes(jsFile.name)) {
-    html = html.replace('</body>', `<script>\n${jsFile.content}\n</script>\n</body>`);
+
+  // Collect all JS files from the same folder
+  const jsFiles = files.filter(f => f.name.endsWith('.js') && !f.name.endsWith('.config.js') && f.path.startsWith(folder + '/'));
+  for (const js of jsFiles) {
+    if (!html.includes(js.name)) {
+      const insertPoint = html.includes('</body>') ? '</body>' : '</html>';
+      html = html.replace(insertPoint, `<script>\n${js.content}\n</script>\n${insertPoint}`);
+    }
   }
+
   return html;
 }
 
@@ -58,18 +78,28 @@ export function PreviewPanel() {
   const [previewMode, setPreviewMode] = useState<PreviewMode>('auto');
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const openFiles = useFileStore(s => s.openFiles);
+  const activeFile = useFileStore(s => s.activeFile);
   const chatMessages = useChat(s => s.messages);
+  const [refreshKey, setRefreshKey] = useState(0);
+
+  // Force refresh when gc:show-preview fires
+  useEffect(() => {
+    const onShowPreview = () => setRefreshKey(k => k + 1);
+    window.addEventListener('gc:show-preview', onShowPreview);
+    return () => window.removeEventListener('gc:show-preview', onShowPreview);
+  }, []);
 
   // Auto-generate preview content from open files or chat
   const autoContent = useMemo(() => {
-    // First try open files
-    const fromFiles = buildFromOpenFiles(openFiles);
+    // First try open files (combine HTML+CSS+JS from same project)
+    const fromFiles = buildFromOpenFiles(openFiles, activeFile);
     if (fromFiles) return fromFiles;
     // Then try chat messages
     const fromChat = extractHtmlFromMessages(chatMessages);
     if (fromChat) return fromChat;
     return null;
-  }, [openFiles, chatMessages]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [openFiles, activeFile, chatMessages, refreshKey]);
 
   const hasContent = previewMode === 'auto' ? !!autoContent : !!url;
 

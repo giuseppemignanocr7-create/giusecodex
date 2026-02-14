@@ -29,6 +29,7 @@ interface FileStore {
   setActiveFile: (path: string) => void;
   updateContent: (path: string, content: string) => void;
   markSaved: (path: string) => void;
+  addGeneratedProject: (projectName: string, files: Array<{ path: string; name: string; content: string; language: string }>) => void;
 }
 
 function getLanguage(name: string): string {
@@ -89,5 +90,56 @@ export const useFileStore = create<FileStore>((set, get) => ({
     set(s => ({
       openFiles: s.openFiles.map(f => f.path === path ? { ...f, dirty: false } : f),
     }));
+  },
+
+  addGeneratedProject: (projectName, files) => {
+    const store = get();
+
+    // Build folder node for tree
+    const childNodes: FileNode[] = files.map(f => ({
+      name: f.name,
+      path: f.path,
+      type: 'file' as const,
+    }));
+
+    const folderNode: FileNode = {
+      name: projectName,
+      path: projectName,
+      type: 'directory',
+      children: childNodes,
+      expanded: true,
+    };
+
+    // Replace existing folder with same name or append
+    const existingIdx = store.tree.findIndex(n => n.path === projectName);
+    let newTree: FileNode[];
+    if (existingIdx >= 0) {
+      newTree = [...store.tree];
+      newTree[existingIdx] = folderNode;
+    } else {
+      newTree = [folderNode, ...store.tree];
+    }
+
+    // Open all files in editor (update if already open)
+    let newOpenFiles = [...store.openFiles];
+    for (const f of files) {
+      const idx = newOpenFiles.findIndex(of => of.path === f.path);
+      const openF: OpenFile = { path: f.path, name: f.name, content: f.content, language: getLanguage(f.name), dirty: true };
+      if (idx >= 0) {
+        newOpenFiles[idx] = openF;
+      } else {
+        newOpenFiles.push(openF);
+      }
+    }
+
+    // Focus the main file (prefer index.html > first html > first file)
+    const mainFile = files.find(f => f.name === 'index.html') || files.find(f => f.name.endsWith('.html')) || files[0];
+
+    set({
+      tree: newTree,
+      openFiles: newOpenFiles,
+      activeFile: mainFile?.path || store.activeFile,
+      projectPath: store.projectPath || projectName,
+    });
   },
 }));
