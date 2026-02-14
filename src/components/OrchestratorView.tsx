@@ -67,7 +67,7 @@ export function OrchestratorView({ opusAnalysis, sonnetStream, codexStream, opus
   }, [opusReview.content]);
 
   return (
-    <div className="flex flex-col h-full gap-2 p-2">
+    <div className="flex flex-col flex-1 min-h-0 gap-2 p-2 overflow-hidden">
       {/* Opus Analysis (collapsible top bar) */}
       <div className="shrink-0 rounded-lg border border-purple/30 bg-purple/5 overflow-hidden">
         <button

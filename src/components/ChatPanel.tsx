@@ -334,13 +334,15 @@ export function ChatPanel() {
 
       {/* Content: Split Orchestrator View or regular messages */}
       {orchActive ? (
-        <OrchestratorView
-          opusAnalysis={opusAnalysis}
-          sonnetStream={sonnetStream}
-          codexStream={codexStream}
-          opusReview={opusReview}
-          isRunning={isStreaming}
-        />
+        <div className="flex-1 min-h-0 overflow-hidden flex flex-col">
+          <OrchestratorView
+            opusAnalysis={opusAnalysis}
+            sonnetStream={sonnetStream}
+            codexStream={codexStream}
+            opusReview={opusReview}
+            isRunning={isStreaming}
+          />
+        </div>
       ) : (
         <div className="flex-1 overflow-y-auto px-3 py-2 space-y-3">
           {messages.length === 0 && (
