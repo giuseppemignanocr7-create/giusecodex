@@ -53,7 +53,19 @@ export function ChatPanel() {
   const [input, setInput] = useState('');
   const [showModelPicker, setShowModelPicker] = useState(false);
   const [showProjectList, setShowProjectList] = useState(false);
-  const [chatMode, setChatMode] = useState<ChatMode>('code');
+  const [chatMode, setChatMode] = useState<ChatMode>(() => {
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem('gc_chat_mode');
+      if (saved === 'ask' || saved === 'code') return saved;
+    }
+    return 'code';
+  });
+
+  // Persist chatMode
+  const updateChatMode = (mode: ChatMode) => {
+    setChatMode(mode);
+    localStorage.setItem('gc_chat_mode', mode);
+  };
   const [newProjectName, setNewProjectName] = useState('');
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -82,6 +94,19 @@ export function ChatPanel() {
       window.removeEventListener('gc:focus-chat-input', onFocusChatInput as EventListener);
     };
   }, []);
+
+  // Close dropdowns on outside click
+  useEffect(() => {
+    const onClick = () => {
+      if (showModelPicker) setShowModelPicker(false);
+      if (showProjectList) setShowProjectList(false);
+    };
+    if (showModelPicker || showProjectList) {
+      // Delay to avoid closing immediately on the same click that opened it
+      const id = setTimeout(() => document.addEventListener('click', onClick), 0);
+      return () => { clearTimeout(id); document.removeEventListener('click', onClick); };
+    }
+  }, [showModelPicker, showProjectList]);
 
   const normalizedModel = currentModel === 'gpt-5.2-codex'
     ? 'gpt-5.2'
@@ -168,6 +193,15 @@ export function ChatPanel() {
     const settings = useSettings.getState();
     const orchestratorEnabled = settings.orchestratorEnabled;
     const shouldRunOrchestrator = orchestratorEnabled && !isElectronApp && chatMode === 'code';
+
+    // Pre-check: orchestrator needs OpenAI key for code gen
+    if (shouldRunOrchestrator && !settings.openaiKey) {
+      addMessage({ id: crypto.randomUUID(), role: 'system', content: '⚠️ **OpenAI API key mancante.** L\'orchestrator ha bisogno della chiave OpenAI per GPT 5.2 (code generation).\nVai in Settings (⚙️) per inserirla, oppure disabilita l\'orchestrator per usare un modello Anthropic direttamente.', timestamp: Date.now() });
+      setInput('');
+      setStreaming(false);
+      useSettings.getState().setOpen(true);
+      return;
+    }
     const systemPrompt = withProjectContext(chatMode === 'ask' ? ASK_SYSTEM_PROMPT : CODE_SYSTEM_PROMPT);
     const rawHistory = [...messages, userMsg].filter(m => m.role === 'user' || ['haiku', 'sonnet', 'opus', 'codex'].includes(m.role)).map(m => ({
       role: m.role === 'user' ? 'user' : 'assistant',
@@ -240,6 +274,7 @@ export function ChatPanel() {
       let accCodex = '';
       let accSonnet = '';
       let accReview = '';
+      let inReviewPhase = false;
 
       while (true) {
         const { done, value } = await reader.read();
@@ -257,6 +292,7 @@ export function ChatPanel() {
               const update = { status: event.status as AgentStream['status'], label: event.label };
               const lbl = (event.label || '').toLowerCase();
               if (event.agent === 'opus' && (lbl.includes('review') || lbl.includes('combining'))) {
+                inReviewPhase = true;
                 setOpusReview(prev => ({ ...prev, ...update }));
               } else if (event.agent === 'opus') {
                 setOpusAnalysis(prev => ({ ...prev, ...update }));
@@ -273,8 +309,7 @@ export function ChatPanel() {
                 accCodex += event.text;
                 setCodexStream(prev => ({ ...prev, content: prev.content + event.text }));
               } else if (event.agent === 'opus') {
-                // Track review phase via a local flag based on step events
-                accReview += event.text;
+                if (inReviewPhase) accReview += event.text;
                 setOpusReview(prev => {
                   if (prev.status === 'running') return { ...prev, content: prev.content + event.text };
                   return prev;
@@ -505,7 +540,7 @@ export function ChatPanel() {
           {/* Ask / Code mode toggle */}
           <div className="flex items-center bg-overlay rounded p-0.5 gap-0.5">
             <button
-              onClick={() => setChatMode('code')}
+              onClick={() => updateChatMode('code')}
               className={`flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-medium transition-colors ${
                 chatMode === 'code' ? 'bg-accent text-base' : 'text-muted hover:text-text'
               }`}
@@ -515,7 +550,7 @@ export function ChatPanel() {
               Code
             </button>
             <button
-              onClick={() => setChatMode('ask')}
+              onClick={() => updateChatMode('ask')}
               className={`flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-medium transition-colors ${
                 chatMode === 'ask' ? 'bg-purple text-base' : 'text-muted hover:text-text'
               }`}

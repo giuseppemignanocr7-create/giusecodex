@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useSettings } from '../stores/settingsStore';
 import { useChat } from '../stores/chatStore';
 import { X, Check, AlertCircle, Loader2, Save, Eye, EyeOff, Zap } from 'lucide-react';
@@ -22,6 +22,13 @@ export function SettingsPanel() {
   const [verifyingAnthropic, setVerifyingAnthropic] = useState(false);
   const [verifyingOpenai, setVerifyingOpenai] = useState(false);
   const [saved, setSaved] = useState(false);
+
+  // Close on Escape key
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') settings.setOpen(false); };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, []);
 
   const verifyAnthropic = async () => {
     if (!settings.anthropicKey) return;
@@ -73,7 +80,7 @@ export function SettingsPanel() {
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" onClick={(e) => { if (e.target === e.currentTarget) settings.setOpen(false); }}>
       <div className="bg-surface border border-base rounded-xl shadow-2xl w-[520px] max-h-[85vh] overflow-y-auto">
         {/* Header */}
         <div className="flex items-center justify-between px-5 py-4 border-b border-base sticky top-0 bg-surface z-10">

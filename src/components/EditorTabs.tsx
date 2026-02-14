@@ -1,4 +1,4 @@
-import { useCallback, useEffect } from 'react';
+import { useCallback, useEffect, useRef } from 'react';
 import { useFileStore } from '../stores/fileStore';
 import Editor from '@monaco-editor/react';
 import { X, Circle, FolderOpen, MessageSquare } from 'lucide-react';
@@ -22,6 +22,10 @@ export function EditorTabs() {
     await saveFile(active.path, active.content);
   }, [active, saveFile]);
 
+  // Ref so Monaco keybinding always calls the latest handleSave
+  const handleSaveRef = useRef(handleSave);
+  useEffect(() => { handleSaveRef.current = handleSave; }, [handleSave]);
+
   const handleSaveAll = useCallback(async () => {
     const files = useFileStore.getState().openFiles;
     for (const f of files) {
@@ -30,18 +34,26 @@ export function EditorTabs() {
     }
   }, [saveFile]);
 
+  const handleNewFile = useCallback(() => {
+    const name = `untitled-${Date.now()}.ts`;
+    useFileStore.getState().openFile({ path: `untitled/${name}`, name, content: '', language: 'typescript', dirty: true });
+  }, []);
+
   useEffect(() => {
     const onSaveActive = () => { void handleSave(); };
     const onSaveAll = () => { void handleSaveAll(); };
+    const onNewFile = () => { handleNewFile(); };
 
     window.addEventListener('gc:save-active-file', onSaveActive as EventListener);
     window.addEventListener('gc:save-all-files', onSaveAll as EventListener);
+    window.addEventListener('gc:new-file', onNewFile as EventListener);
 
     return () => {
       window.removeEventListener('gc:save-active-file', onSaveActive as EventListener);
       window.removeEventListener('gc:save-all-files', onSaveAll as EventListener);
+      window.removeEventListener('gc:new-file', onNewFile as EventListener);
     };
-  }, [handleSave, handleSaveAll]);
+  }, [handleSave, handleSaveAll, handleNewFile]);
 
   return (
     <div className="h-full flex flex-col bg-base">
@@ -77,7 +89,7 @@ export function EditorTabs() {
             theme="vs-dark"
             onChange={(val) => updateContent(active.path, val || '')}
             onMount={(editor) => {
-              editor.addCommand(2097 /* Ctrl+S */, handleSave);
+              editor.addCommand(2097 /* Ctrl+S */, () => handleSaveRef.current());
             }}
             options={{
               fontSize: 14,
