@@ -291,7 +291,7 @@ app.post('/api/chat/codex', async (req, res) => {
 // ──── Orchestrated Chat (Opus → Sonnet + Codex → Opus review) ────
 
 app.post('/api/chat/orchestrate', async (req, res) => {
-  const { messages, anthropicKey, openaiKey, chatMode } = req.body;
+  const { messages, anthropicKey, openaiKey, chatMode, projectContext } = req.body;
 
   if (!anthropicKey) {
     return res.status(400).json({ error: 'Anthropic API key required' });
@@ -311,6 +311,7 @@ app.post('/api/chat/orchestrate', async (req, res) => {
       openaiKey: openaiKey || '',
       chatMode: chatMode || 'code',
       useCodexCLI: codexAvailable,
+      projectContext: projectContext || '',
       onStep: (step) => {
         sendEvent('step', { agent: step.agent, label: step.label, status: step.status });
       },

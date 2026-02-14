@@ -6,6 +6,7 @@ import { OrchestratorView, AgentStream } from './OrchestratorView';
 import { Send, Trash2, Zap, Bot, User, ChevronDown, FolderPlus, Folder, X, StopCircle, MessageCircle, Code2 } from 'lucide-react';
 import { isElectronApp, streamAnthropic, streamOpenAI, streamViaServer } from '../lib/directApi';
 import { openCodeInEditor } from '../lib/codeExtractor';
+import { withProjectContext, buildProjectContext } from '../lib/projectContext';
 
 type ChatMode = 'code' | 'ask';
 const ASK_SYSTEM_PROMPT = 'You are GiuseCoder, a helpful coding assistant. The user is in ASK mode — answer questions, explain concepts, review code, and provide guidance. Do NOT generate new code unless explicitly asked. Focus on clear explanations.';
@@ -167,7 +168,7 @@ export function ChatPanel() {
     const settings = useSettings.getState();
     const orchestratorEnabled = settings.orchestratorEnabled;
     const shouldRunOrchestrator = orchestratorEnabled && !isElectronApp && chatMode === 'code';
-    const systemPrompt = chatMode === 'ask' ? ASK_SYSTEM_PROMPT : CODE_SYSTEM_PROMPT;
+    const systemPrompt = withProjectContext(chatMode === 'ask' ? ASK_SYSTEM_PROMPT : CODE_SYSTEM_PROMPT);
     const rawHistory = [...messages, userMsg].filter(m => m.role === 'user' || ['haiku', 'sonnet', 'opus', 'codex'].includes(m.role)).map(m => ({
       role: m.role === 'user' ? 'user' : 'assistant',
       content: m.content,
@@ -219,6 +220,7 @@ export function ChatPanel() {
           anthropicKey: apiKey,
           openaiKey: settings.openaiKey,
           chatMode: chatModeValue,
+          projectContext: buildProjectContext(),
         }),
         signal: abort.signal,
       });

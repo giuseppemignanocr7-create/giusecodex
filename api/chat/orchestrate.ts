@@ -115,10 +115,13 @@ export default async function handler(req: Request) {
     return new Response(JSON.stringify({ error: 'Method not allowed' }), { status: 405 });
   }
 
-  const { messages, anthropicKey, openaiKey, chatMode } = await req.json();
+  const { messages, anthropicKey, openaiKey, chatMode, projectContext } = await req.json();
   if (!anthropicKey) {
     return new Response(JSON.stringify({ error: 'Anthropic API key required' }), { status: 400 });
   }
+
+  // Inject project context into system prompts
+  const ctxSuffix = projectContext ? `\n\n---\n# CURRENT PROJECT CONTEXT\n${projectContext}` : '';
 
   const { readable, writable } = new TransformStream();
   const writer = writable.getWriter();
@@ -133,7 +136,7 @@ export default async function handler(req: Request) {
     try {
       if (chatMode === 'ask') {
         await send('step', { agent: 'opus', label: 'Opus answering in Ask mode...', status: 'running' });
-        const askText = await streamAnthropic(anthropicKey, 'claude-opus-4-6', ASK_OPUS_SYSTEM, messages, writer, encoder, 'opus');
+        const askText = await streamAnthropic(anthropicKey, 'claude-opus-4-6', ASK_OPUS_SYSTEM + ctxSuffix, messages, writer, encoder, 'opus');
         await send('step', { agent: 'opus', label: 'Ask response complete', status: 'done' });
         await send('done', { content: askText });
         await writer.write(encoder.encode('data: [DONE]\n\n'));
@@ -142,7 +145,7 @@ export default async function handler(req: Request) {
 
       // Step 1: Opus plans
       await send('step', { agent: 'opus', label: 'Opus analyzing request...', status: 'running' });
-      const planText = await streamAnthropic(anthropicKey, 'claude-opus-4-6', OPUS_SYSTEM, messages, writer, encoder, 'opus');
+      const planText = await streamAnthropic(anthropicKey, 'claude-opus-4-6', OPUS_SYSTEM + ctxSuffix, messages, writer, encoder, 'opus');
       await send('step', { agent: 'opus', label: 'Analysis complete', status: 'done' });
 
       // Parse plan

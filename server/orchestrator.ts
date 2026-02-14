@@ -8,6 +8,7 @@ export interface OrchestratorConfig {
   openaiKey: string;
   chatMode?: 'code' | 'ask';
   useCodexCLI?: boolean; // true on localhost/Electron, false on Vercel
+  projectContext?: string; // file tree + open files content
   onStep: (step: PipelineStep) => void;
   onToken: (agent: string, text: string) => void;
 }
@@ -88,10 +89,13 @@ export async function orchestrate(
 ): Promise<string> {
   const anthropic = new Anthropic({ apiKey: config.anthropicKey });
 
+  // Inject project context into system prompts
+  const ctxSuffix = config.projectContext ? `\n\n---\n# CURRENT PROJECT CONTEXT\n${config.projectContext}` : '';
+
   // ASK mode: Opus answers directly, no pipeline
   if (config.chatMode === 'ask') {
     config.onStep({ agent: 'opus', label: 'Opus answering in Ask mode...', status: 'running' });
-    const askText = await callAnthropic(anthropic, 'claude-opus-4-6', ASK_OPUS_SYSTEM, messages, config, 'opus');
+    const askText = await callAnthropic(anthropic, 'claude-opus-4-6', ASK_OPUS_SYSTEM + ctxSuffix, messages, config, 'opus');
     config.onStep({ agent: 'opus', label: 'Ask response complete', status: 'done' });
     return askText;
   }
@@ -99,7 +103,7 @@ export async function orchestrate(
   // Step 1: Opus analyzes and plans
   config.onStep({ agent: 'opus', label: 'Opus analyzing request...', status: 'running' });
 
-  const planResponse = await callAnthropic(anthropic, 'claude-opus-4-6', OPUS_SYSTEM, messages, config, 'opus');
+  const planResponse = await callAnthropic(anthropic, 'claude-opus-4-6', OPUS_SYSTEM + ctxSuffix, messages, config, 'opus');
   config.onStep({ agent: 'opus', label: 'Opus analysis complete', status: 'done', content: planResponse });
 
   // Parse plan
