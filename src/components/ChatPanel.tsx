@@ -3,8 +3,11 @@ import { useChat, ChatMessage, AgentRole } from '../stores/chatStore';
 import { useSettings } from '../stores/settingsStore';
 import { useProjects } from '../stores/projectStore';
 import { OrchestratorView, AgentStream } from './OrchestratorView';
-import { Send, Trash2, Zap, Bot, User, ChevronDown, FolderPlus, Folder, X, StopCircle } from 'lucide-react';
+import { Send, Trash2, Zap, Bot, User, ChevronDown, FolderPlus, Folder, X, StopCircle, MessageCircle, Code2 } from 'lucide-react';
 import { isElectronApp, streamAnthropic, streamOpenAI, streamViaServer } from '../lib/directApi';
+
+type ChatMode = 'code' | 'ask';
+const ASK_SYSTEM_PROMPT = 'You are GiuseCoder, a helpful coding assistant. The user is in ASK mode — answer questions, explain concepts, review code, and provide guidance. Do NOT generate new code unless explicitly asked. Focus on clear explanations.';
 
 // Detect if running in Electron (has Codex CLI for GPT 5.3)
 const isElectron = typeof window !== 'undefined' && (window as any).giuseCoder?.isElectron;
@@ -44,6 +47,7 @@ export function ChatPanel() {
   const [input, setInput] = useState('');
   const [showModelPicker, setShowModelPicker] = useState(false);
   const [showProjectList, setShowProjectList] = useState(false);
+  const [chatMode, setChatMode] = useState<ChatMode>('code');
   const [newProjectName, setNewProjectName] = useState('');
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -84,10 +88,14 @@ export function ChatPanel() {
 
     const settings = useSettings.getState();
     const orchestratorEnabled = settings.orchestratorEnabled;
-    const chatHistory = [...messages, userMsg].filter(m => m.role === 'user' || ['haiku', 'sonnet', 'opus', 'codex'].includes(m.role)).map(m => ({
+    const rawHistory = [...messages, userMsg].filter(m => m.role === 'user' || ['haiku', 'sonnet', 'opus', 'codex'].includes(m.role)).map(m => ({
       role: m.role === 'user' ? 'user' : 'assistant',
       content: m.content,
     }));
+    // In Ask mode, prepend a system-like user message for context
+    const chatHistory = chatMode === 'ask'
+      ? [{ role: 'user', content: ASK_SYSTEM_PROMPT }, { role: 'assistant', content: 'Understood. I\'m in Ask mode — I\'ll explain and guide without generating code unless you ask.' }, ...rawHistory]
+      : rawHistory;
 
     if (orchestratorEnabled) {
       await sendOrchestrated(chatHistory, settings);
@@ -360,7 +368,31 @@ export function ChatPanel() {
 
       {/* Model picker + Input */}
       <div className="border-t border-base p-2 shrink-0">
-        <div className="relative mb-2">
+        <div className="relative mb-2 flex items-center gap-2">
+          {/* Ask / Code mode toggle */}
+          <div className="flex items-center bg-overlay rounded p-0.5 gap-0.5">
+            <button
+              onClick={() => setChatMode('code')}
+              className={`flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-medium transition-colors ${
+                chatMode === 'code' ? 'bg-accent text-base' : 'text-muted hover:text-text'
+              }`}
+              title="Code mode — generate and edit code"
+            >
+              <Code2 className="w-3 h-3" />
+              Code
+            </button>
+            <button
+              onClick={() => setChatMode('ask')}
+              className={`flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-medium transition-colors ${
+                chatMode === 'ask' ? 'bg-purple text-base' : 'text-muted hover:text-text'
+              }`}
+              title="Ask mode — explain, review, guide"
+            >
+              <MessageCircle className="w-3 h-3" />
+              Ask
+            </button>
+          </div>
+          {/* Model picker */}
           <button
             onClick={() => setShowModelPicker(!showModelPicker)}
             className="flex items-center gap-1.5 text-[10px] px-2 py-1 rounded bg-overlay text-muted hover:text-text transition-colors"

@@ -1,26 +1,72 @@
-import { useEffect } from 'react';
+import { useState, useRef } from 'react';
 import { useFileStore, FileNode } from '../stores/fileStore';
-import { ChevronRight, ChevronDown, File, Folder, FolderOpen, RefreshCw } from 'lucide-react';
+import { ChevronRight, ChevronDown, File, Folder, FolderOpen, RefreshCw, Upload } from 'lucide-react';
+import { isElectronApp } from '../lib/directApi';
 
-async function fetchTree(path: string): Promise<FileNode[]> {
-  const res = await fetch(`/api/files/tree?path=${encodeURIComponent(path)}`);
-  return res.json();
+// Store directory handles for re-reading
+const handleMap = new Map<string, FileSystemDirectoryHandle | FileSystemFileHandle>();
+
+async function readDirHandle(dirHandle: FileSystemDirectoryHandle, parentPath: string): Promise<FileNode[]> {
+  const entries: FileNode[] = [];
+  for await (const [name, handle] of (dirHandle as any).entries()) {
+    const fullPath = parentPath ? `${parentPath}/${name}` : name;
+    handleMap.set(fullPath, handle);
+    if (handle.kind === 'directory') {
+      entries.push({ name, path: fullPath, type: 'directory', children: [], expanded: false });
+    } else {
+      entries.push({ name, path: fullPath, type: 'file' });
+    }
+  }
+  return entries.sort((a, b) => {
+    if (a.type !== b.type) return a.type === 'directory' ? -1 : 1;
+    return a.name.localeCompare(b.name);
+  });
 }
 
-async function fetchFileContent(path: string): Promise<string> {
-  const res = await fetch(`/api/files/read?path=${encodeURIComponent(path)}`);
-  const data = await res.json();
-  return data.content;
+async function readFileHandle(handle: FileSystemFileHandle): Promise<string> {
+  const file = await handle.getFile();
+  return file.text();
 }
 
-function TreeItem({ node, depth }: { node: FileNode; depth: number }) {
+async function expandDir(path: string): Promise<FileNode[]> {
+  const handle = handleMap.get(path);
+  if (!handle || handle.kind !== 'directory') return [];
+  return readDirHandle(handle as FileSystemDirectoryHandle, path);
+}
+
+// Server-based fetch (fallback for Vercel with Express server running)
+async function fetchTreeServer(path: string): Promise<FileNode[]> {
+  try {
+    const res = await fetch(`/api/files/tree?path=${encodeURIComponent(path)}`);
+    if (!res.ok) return [];
+    return res.json();
+  } catch { return []; }
+}
+
+async function fetchFileServer(path: string): Promise<string> {
+  try {
+    const res = await fetch(`/api/files/read?path=${encodeURIComponent(path)}`);
+    const data = await res.json();
+    return data.content;
+  } catch { return ''; }
+}
+
+function TreeItem({ node, depth, onExpand }: { node: FileNode; depth: number; onExpand: (path: string) => void }) {
   const { toggleDir, openFile, activeFile } = useFileStore();
 
   const handleClick = async () => {
     if (node.type === 'directory') {
+      if (!node.expanded) onExpand(node.path);
       toggleDir(node.path);
     } else {
-      const content = await fetchFileContent(node.path);
+      // Read file content
+      const handle = handleMap.get(node.path);
+      let content = '';
+      if (handle && handle.kind === 'file') {
+        content = await readFileHandle(handle as FileSystemFileHandle);
+      } else if (!isElectronApp) {
+        content = await fetchFileServer(node.path);
+      }
       openFile({ path: node.path, name: node.name, content, language: '', dirty: false });
     }
   };
@@ -50,7 +96,7 @@ function TreeItem({ node, depth }: { node: FileNode; depth: number }) {
         <span className="truncate">{node.name}</span>
       </div>
       {node.type === 'directory' && node.expanded && node.children?.map(child => (
-        <TreeItem key={child.path} node={child} depth={depth + 1} />
+        <TreeItem key={child.path} node={child} depth={depth + 1} onExpand={onExpand} />
       ))}
     </div>
   );
@@ -58,21 +104,59 @@ function TreeItem({ node, depth }: { node: FileNode; depth: number }) {
 
 export function FileTree() {
   const { tree, setTree, projectPath, setProjectPath } = useFileStore();
-
-  const loadTree = async (path?: string) => {
-    const p = path || projectPath || '.';
-    const data = await fetchTree(p);
-    setTree(data);
-    if (!projectPath) setProjectPath(p);
-  };
-
-  useEffect(() => { loadTree(); }, []);
+  const [rootName, setRootName] = useState('');
+  const rootHandleRef = useRef<FileSystemDirectoryHandle | null>(null);
 
   const handleOpenFolder = async () => {
-    const path = prompt('Enter project folder path:', projectPath || 'C:\\Users\\HP\\Desktop\\myproject');
-    if (path) {
-      setProjectPath(path);
-      loadTree(path);
+    try {
+      if ('showDirectoryPicker' in window) {
+        // File System Access API (Electron + Chrome/Edge)
+        const dirHandle = await (window as any).showDirectoryPicker({ mode: 'readwrite' });
+        rootHandleRef.current = dirHandle;
+        handleMap.clear();
+        handleMap.set('', dirHandle);
+        const children = await readDirHandle(dirHandle, '');
+        setTree(children);
+        setRootName(dirHandle.name);
+        setProjectPath(dirHandle.name);
+      } else {
+        // Fallback: prompt path (for older browsers)
+        const path = prompt('Enter project folder path:');
+        if (path) {
+          setProjectPath(path);
+          const data = await fetchTreeServer(path);
+          setTree(data);
+          setRootName(path.split('/').pop() || path.split('\\').pop() || path);
+        }
+      }
+    } catch (err: any) {
+      if (err.name !== 'AbortError') {
+        console.error('Failed to open folder:', err);
+      }
+    }
+  };
+
+  const handleExpand = async (path: string) => {
+    const children = await expandDir(path);
+    if (children.length === 0) return;
+    const updateChildren = (nodes: FileNode[]): FileNode[] =>
+      nodes.map(n => {
+        if (n.path === path) return { ...n, children, expanded: true };
+        if (n.children) return { ...n, children: updateChildren(n.children) };
+        return n;
+      });
+    setTree(updateChildren(tree));
+  };
+
+  const handleRefresh = async () => {
+    if (rootHandleRef.current) {
+      handleMap.clear();
+      handleMap.set('', rootHandleRef.current);
+      const children = await readDirHandle(rootHandleRef.current, '');
+      setTree(children);
+    } else if (projectPath) {
+      const data = await fetchTreeServer(projectPath);
+      setTree(data);
     }
   };
 
@@ -82,9 +166,9 @@ export function FileTree() {
         <span className="text-xs font-semibold text-muted uppercase tracking-wider">Explorer</span>
         <div className="flex gap-1">
           <button onClick={handleOpenFolder} className="p-1 text-muted hover:text-text rounded hover:bg-overlay" title="Open Folder">
-            <Folder className="w-3.5 h-3.5" />
+            <Upload className="w-3.5 h-3.5" />
           </button>
-          <button onClick={() => loadTree()} className="p-1 text-muted hover:text-text rounded hover:bg-overlay" title="Refresh">
+          <button onClick={handleRefresh} className="p-1 text-muted hover:text-text rounded hover:bg-overlay" title="Refresh">
             <RefreshCw className="w-3.5 h-3.5" />
           </button>
         </div>
@@ -92,11 +176,19 @@ export function FileTree() {
       <div className="flex-1 overflow-y-auto py-1">
         {tree.length === 0 ? (
           <div className="px-4 py-8 text-center">
+            <Folder className="w-8 h-8 text-muted/20 mx-auto mb-3" />
             <p className="text-muted text-xs mb-2">No folder open</p>
             <button onClick={handleOpenFolder} className="text-accent text-xs hover:underline">Open a folder</button>
           </div>
         ) : (
-          tree.map(node => <TreeItem key={node.path} node={node} depth={0} />)
+          <>
+            {rootName && (
+              <div className="px-3 py-1 text-[10px] font-semibold text-muted uppercase tracking-wider border-b border-base">
+                {rootName}
+              </div>
+            )}
+            {tree.map(node => <TreeItem key={node.path} node={node} depth={0} onExpand={handleExpand} />)}
+          </>
         )}
       </div>
     </div>
