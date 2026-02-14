@@ -11,4 +11,5 @@ contextBridge.exposeInMainWorld('giuseCoder', {
   onServerStatus: (callback: (status: string) => void) => {
     ipcRenderer.on('server-status', (_event, status) => callback(status));
   },
+  getServerInfo: () => ipcRenderer.invoke('get-server-info'),
 });

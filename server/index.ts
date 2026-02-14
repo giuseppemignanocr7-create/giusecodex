@@ -10,10 +10,10 @@ app.use(cors());
 app.use(express.json({ limit: '10mb' }));
 
 // Auto-detect codex CLI availability
+import { execSync } from 'child_process';
 let codexAvailable = process.env.CODEX_AVAILABLE === '1';
 if (!codexAvailable) {
   try {
-    const { execSync } = await import('child_process');
     execSync('codex --version', { stdio: 'ignore' });
     codexAvailable = true;
   } catch {
