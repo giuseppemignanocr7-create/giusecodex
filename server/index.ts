@@ -9,6 +9,18 @@ const app = express();
 app.use(cors());
 app.use(express.json({ limit: '10mb' }));
 
+// Auto-detect codex CLI availability
+let codexAvailable = process.env.CODEX_AVAILABLE === '1';
+if (!codexAvailable) {
+  try {
+    const { execSync } = await import('child_process');
+    execSync('codex --version', { stdio: 'ignore' });
+    codexAvailable = true;
+  } catch {
+    codexAvailable = false;
+  }
+}
+
 // ──── Serve frontend static files (Electron packaged mode) ────
 const staticDir = process.env.STATIC_DIR;
 if (staticDir) {
@@ -279,7 +291,7 @@ app.post('/api/chat/codex', async (req, res) => {
 // ──── Orchestrated Chat (Opus → Sonnet + Codex → Opus review) ────
 
 app.post('/api/chat/orchestrate', async (req, res) => {
-  const { messages, anthropicKey, openaiKey } = req.body;
+  const { messages, anthropicKey, openaiKey, chatMode } = req.body;
 
   if (!anthropicKey) {
     return res.status(400).json({ error: 'Anthropic API key required' });
@@ -297,6 +309,8 @@ app.post('/api/chat/orchestrate', async (req, res) => {
     const result = await orchestrate(messages, {
       anthropicKey,
       openaiKey: openaiKey || '',
+      chatMode: chatMode || 'code',
+      useCodexCLI: codexAvailable,
       onStep: (step) => {
         sendEvent('step', { agent: step.agent, label: step.label, status: step.status });
       },
@@ -316,8 +330,6 @@ app.post('/api/chat/orchestrate', async (req, res) => {
 });
 
 // ──── Health Check + Info ────
-
-const codexAvailable = process.env.CODEX_AVAILABLE === '1';
 
 app.get('/api/health', (_req, res) => {
   res.json({

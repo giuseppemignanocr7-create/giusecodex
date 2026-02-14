@@ -140,7 +140,8 @@ export function ChatPanel() {
     setOrchActive(true);
     setOpusAnalysis({ agent: 'opus', content: '', status: 'running', label: 'Opus 4.6 — CTO Analysis' });
     setSonnetStream({ agent: 'sonnet', content: '', status: 'idle', label: 'Sonnet 4.5 — UI/Design' });
-    setCodexStream({ agent: 'codex', content: '', status: 'idle', label: 'GPT 5.2 — Code' });
+    const isLocalhost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+    setCodexStream({ agent: 'codex', content: '', status: 'idle', label: isLocalhost ? 'GPT 5.3 Codex — Code' : 'GPT 5.2 — Code' });
     setOpusReview({ agent: 'opus', content: '', status: 'idle', label: 'Opus 4.6 — Final Review' });
 
     try {

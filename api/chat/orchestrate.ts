@@ -175,17 +175,22 @@ export default async function handler(req: Request) {
         })());
       }
 
-      if (plan.needsCode && openaiKey) {
+      if (plan.needsCode) {
         tasks.push((async () => {
+          if (!openaiKey) {
+            await send('step', { agent: 'codex', label: '❌ No OpenAI API key — cannot run GPT 5.2', status: 'error' });
+            await send('token', { agent: 'codex', text: '\n❌ **OpenAI API key required** for code generation.\nGo to Settings (⚙️) and add your OpenAI API key to enable GPT 5.2.\nSonnet is NOT used for code — only GPT writes code in GiuseCoder.\n' });
+            return;
+          }
+
           await send('step', { agent: 'codex', label: 'GPT 5.2 writing code...', status: 'running' });
-          let gptSuccess = false;
           let lastErr = '';
 
-          // Try GPT up to 2 times before falling back
-          for (let attempt = 1; attempt <= 2 && !gptSuccess; attempt++) {
+          for (let attempt = 1; attempt <= 2; attempt++) {
             try {
               if (attempt > 1) {
                 await send('step', { agent: 'codex', label: `GPT 5.2 retry #${attempt}...`, status: 'running' });
+                await send('token', { agent: 'codex', text: `\n⚠️ Retrying GPT 5.2 (attempt ${attempt})...\n` });
               }
               const codeOut = await streamOpenAI(openaiKey, 'gpt-5.2', CODEX_SYSTEM,
                 [...messages, { role: 'user', content: plan.codePrompt }], writer, encoder, 'codex');
@@ -193,31 +198,16 @@ export default async function handler(req: Request) {
                 throw new Error('GPT returned empty output');
               }
               results.code = codeOut;
-              gptSuccess = true;
+              await send('step', { agent: 'codex', label: 'GPT 5.2 code complete ✓', status: 'done' });
+              return;
             } catch (openaiErr: unknown) {
               lastErr = openaiErr instanceof Error ? openaiErr.message : 'OpenAI failed';
-              // Clear previous codex tokens for retry
-              if (attempt < 2) {
-                await send('token', { agent: 'codex', text: `\n⚠️ GPT attempt ${attempt} failed: ${lastErr}. Retrying...\n` });
-              }
             }
           }
 
-          if (!gptSuccess) {
-            await send('token', { agent: 'codex', text: `\n❌ GPT 5.2 failed after 2 attempts: ${lastErr}\n🔄 Falling back to Sonnet 4.5...\n\n` });
-            await send('step', { agent: 'codex', label: `GPT failed: ${lastErr.slice(0, 80)} — Sonnet fallback`, status: 'running' });
-            results.code = await streamAnthropic(anthropicKey, 'claude-sonnet-4-5-20250929', CODEX_SYSTEM,
-              [...messages, { role: 'user', content: plan.codePrompt }], writer, encoder, 'codex');
-          }
-          await send('step', { agent: 'codex', label: gptSuccess ? 'GPT 5.2 code complete' : 'Code complete (Sonnet fallback)', status: 'done' });
-        })());
-      } else if (plan.needsCode) {
-        tasks.push((async () => {
-          await send('step', { agent: 'codex', label: 'Sonnet 4.5 writing code (no OpenAI key)...', status: 'running' });
-          await send('token', { agent: 'codex', text: '⚠️ No OpenAI API key set — add it in Settings to use GPT 5.2 for code generation.\n\n' });
-          results.code = await streamAnthropic(anthropicKey, 'claude-sonnet-4-5-20250929', CODEX_SYSTEM,
-            [...messages, { role: 'user', content: plan.codePrompt }], writer, encoder, 'codex');
-          await send('step', { agent: 'codex', label: 'Code complete (Sonnet — no OpenAI key)', status: 'done' });
+          // GPT failed after retries — show error, do NOT fall back to Sonnet
+          await send('step', { agent: 'codex', label: `❌ GPT 5.2 failed: ${lastErr.slice(0, 100)}`, status: 'error' });
+          await send('token', { agent: 'codex', text: `\n❌ **GPT 5.2 failed after 2 attempts:** ${lastErr}\n\nPlease check:\n- Your OpenAI API key is valid\n- Your OpenAI account has GPT 5.2 access\n- You have sufficient API credits\n` });
         })());
       }
 

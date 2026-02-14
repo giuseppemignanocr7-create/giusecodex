@@ -1,10 +1,13 @@
 import Anthropic from '@anthropic-ai/sdk';
+import { spawn } from 'child_process';
 
 // ──── Types ────
 
 export interface OrchestratorConfig {
   anthropicKey: string;
   openaiKey: string;
+  chatMode?: 'code' | 'ask';
+  useCodexCLI?: boolean; // true on localhost/Electron, false on Vercel
   onStep: (step: PipelineStep) => void;
   onToken: (agent: string, text: string) => void;
 }
@@ -26,10 +29,15 @@ interface TaskPlan {
 
 // ──── System Prompts ────
 
+const ASK_OPUS_SYSTEM = `You are GiuseCoder Opus in ASK mode.
+The user wants guidance, explanations, architecture reasoning, debugging help, or reviews.
+Do NOT proactively generate full implementation code unless explicitly requested.
+Be concise, practical, and clear.`;
+
 const OPUS_SYSTEM = `You are GiuseCoder Opus, the CTO and lead architect.
 Your role:
 1. ANALYZE the user's request
-2. PLAN: decide if it needs UI/design work (Sonnet 4.5) and/or code (GPT 5.2)
+2. PLAN: decide if it needs UI/design work (Sonnet 4.5) and/or code (GPT 5.3 Codex / GPT 5.2)
 3. DELEGATE: create clear prompts for each agent
 4. REVIEW: combine their outputs and give the final answer
 
@@ -40,7 +48,7 @@ You MUST respond with a JSON plan in this exact format:
   "needsDesign": true/false,
   "needsCode": true/false,
   "designPrompt": "Detailed prompt for Sonnet 4.5 (UI/CSS/layout/design). Empty string if not needed.",
-  "codePrompt": "Detailed prompt for GPT 5.2 (implementation/logic/backend). Empty string if not needed."
+  "codePrompt": "Detailed prompt for GPT (implementation/logic/backend). Empty string if not needed."
 }
 \`\`\`
 
@@ -80,6 +88,14 @@ export async function orchestrate(
 ): Promise<string> {
   const anthropic = new Anthropic({ apiKey: config.anthropicKey });
 
+  // ASK mode: Opus answers directly, no pipeline
+  if (config.chatMode === 'ask') {
+    config.onStep({ agent: 'opus', label: 'Opus answering in Ask mode...', status: 'running' });
+    const askText = await callAnthropic(anthropic, 'claude-opus-4-6', ASK_OPUS_SYSTEM, messages, config, 'opus');
+    config.onStep({ agent: 'opus', label: 'Ask response complete', status: 'done' });
+    return askText;
+  }
+
   // Step 1: Opus analyzes and plans
   config.onStep({ agent: 'opus', label: 'Opus analyzing request...', status: 'running' });
 
@@ -92,19 +108,18 @@ export async function orchestrate(
     const jsonMatch = planResponse.match(/```json\s*([\s\S]*?)\s*```/);
     plan = JSON.parse(jsonMatch ? jsonMatch[1] : planResponse);
   } catch {
-    // If Opus didn't give JSON, return directly (simple answer)
     return planResponse;
   }
 
-  // Simple question — Opus answers directly
   if (!plan.needsDesign && !plan.needsCode) {
     return plan.summary;
   }
 
   // Step 2: Delegate to agents (parallel when both needed)
   const results: { design?: string; code?: string } = {};
-
   const tasks: Promise<void>[] = [];
+  const useCodex = config.useCodexCLI === true;
+  const codeAgent = useCodex ? 'GPT 5.3 Codex CLI' : 'GPT 5.2 API';
 
   if (plan.needsDesign) {
     tasks.push((async () => {
@@ -117,23 +132,58 @@ export async function orchestrate(
 
   if (plan.needsCode) {
     tasks.push((async () => {
-      config.onStep({ agent: 'codex', label: 'GPT 5.2 writing code...', status: 'running' });
+      config.onStep({ agent: 'codex', label: `${codeAgent} writing code...`, status: 'running' });
       const codeMessages = [...messages, { role: 'user', content: plan.codePrompt }];
-      try {
+
+      if (useCodex) {
+        // Localhost/Electron: use codex CLI with GPT 5.3
+        try {
+          results.code = await callCodexCLI(plan.codePrompt, config);
+          if (!results.code?.trim()) throw new Error('Codex CLI returned empty output');
+          config.onStep({ agent: 'codex', label: 'GPT 5.3 Codex code complete ✓', status: 'done', content: results.code });
+        } catch (cliErr: unknown) {
+          const msg = cliErr instanceof Error ? cliErr.message : 'Codex CLI failed';
+          // Try GPT 5.2 API as secondary before giving up
+          if (config.openaiKey) {
+            config.onToken('codex', `\n⚠️ Codex CLI failed: ${msg}. Trying GPT 5.2 API...\n`);
+            config.onStep({ agent: 'codex', label: 'Trying GPT 5.2 API...', status: 'running' });
+            try {
+              results.code = await callOpenAI(config.openaiKey, 'gpt-5.2', CODEX_SYSTEM, codeMessages, config);
+              config.onStep({ agent: 'codex', label: 'GPT 5.2 code complete ✓', status: 'done', content: results.code });
+            } catch (apiErr: unknown) {
+              const apiMsg = apiErr instanceof Error ? apiErr.message : 'API failed';
+              config.onStep({ agent: 'codex', label: `❌ Both GPT 5.3 CLI and 5.2 API failed`, status: 'error' });
+              config.onToken('codex', `\n❌ GPT 5.2 API also failed: ${apiMsg}\n`);
+            }
+          } else {
+            config.onStep({ agent: 'codex', label: `❌ Codex CLI failed: ${msg.slice(0, 80)}`, status: 'error' });
+            config.onToken('codex', `\n❌ **Codex CLI failed:** ${msg}\nNo OpenAI API key set as backup.\n`);
+          }
+        }
+      } else {
+        // Vercel/web: use GPT 5.2 API — NO Sonnet fallback
         if (!config.openaiKey) {
-          throw new Error('OpenAI key missing');
+          config.onStep({ agent: 'codex', label: '❌ No OpenAI API key', status: 'error' });
+          config.onToken('codex', '\n❌ **OpenAI API key required** for GPT 5.2 code generation.\nGo to Settings (⚙️) and add your key.\n');
+        } else {
+          let lastErr = '';
+          for (let attempt = 1; attempt <= 2; attempt++) {
+            try {
+              if (attempt > 1) {
+                config.onStep({ agent: 'codex', label: `GPT 5.2 retry #${attempt}...`, status: 'running' });
+              }
+              results.code = await callOpenAI(config.openaiKey, 'gpt-5.2', CODEX_SYSTEM, codeMessages, config);
+              if (!results.code?.trim()) throw new Error('GPT returned empty output');
+              config.onStep({ agent: 'codex', label: 'GPT 5.2 code complete ✓', status: 'done', content: results.code });
+              return;
+            } catch (err: unknown) {
+              lastErr = err instanceof Error ? err.message : 'OpenAI failed';
+            }
+          }
+          config.onStep({ agent: 'codex', label: `❌ GPT 5.2 failed: ${lastErr.slice(0, 80)}`, status: 'error' });
+          config.onToken('codex', `\n❌ **GPT 5.2 failed:** ${lastErr}\n`);
         }
-        results.code = await callOpenAI(config.openaiKey, 'gpt-5.2', CODEX_SYSTEM, codeMessages, config);
-        if (!results.code?.trim()) {
-          throw new Error('GPT returned empty output');
-        }
-      } catch (openaiErr: unknown) {
-        const msg = openaiErr instanceof Error ? openaiErr.message : 'OpenAI failed';
-        config.onToken('codex', `\n[Fallback] ${msg}\n`);
-        config.onStep({ agent: 'codex', label: 'Fallback: Sonnet 4.5 generating code...', status: 'running' });
-        results.code = await callAnthropic(anthropic, 'claude-sonnet-4-5-20250929', CODEX_SYSTEM, codeMessages, config, 'codex');
       }
-      config.onStep({ agent: 'codex', label: 'Code complete', status: 'done', content: results.code });
     })());
   }
 
@@ -142,7 +192,7 @@ export async function orchestrate(
   // Step 3: Opus reviews and combines
   config.onStep({ agent: 'opus', label: 'Opus reviewing & combining...', status: 'running' });
 
-  const reviewPrompt = buildReviewPrompt(plan, results);
+  const reviewPrompt = buildReviewPrompt(plan, results, codeAgent);
   const reviewMessages = [...messages, { role: 'user', content: reviewPrompt }];
   const finalResponse = await callAnthropic(anthropic, 'claude-opus-4-6', OPUS_REVIEW_SYSTEM, reviewMessages, config, 'opus');
 
@@ -153,7 +203,7 @@ export async function orchestrate(
 
 // ──── Helpers ────
 
-function buildReviewPrompt(plan: TaskPlan, results: { design?: string; code?: string }): string {
+function buildReviewPrompt(plan: TaskPlan, results: { design?: string; code?: string }, codeAgent: string): string {
   let prompt = `Here are the outputs from the team:\n\n`;
   prompt += `**Task Analysis:** ${plan.summary}\n\n`;
 
@@ -161,11 +211,61 @@ function buildReviewPrompt(plan: TaskPlan, results: { design?: string; code?: st
     prompt += `## Sonnet's UI/Design Output:\n${results.design}\n\n`;
   }
   if (results.code) {
-    prompt += `## GPT 5.2 Code Output:\n${results.code}\n\n`;
+    prompt += `## ${codeAgent} Code Output:\n${results.code}\n\n`;
   }
 
   prompt += `Please combine these into a single, polished response for the user. Resolve any conflicts and present the complete solution.`;
   return prompt;
+}
+
+// ──── Codex CLI (GPT 5.3 via ChatGPT auth) ────
+
+function callCodexCLI(prompt: string, config: OrchestratorConfig): Promise<string> {
+  return new Promise((resolve, reject) => {
+    let result = '';
+    const codex = spawn('codex', [
+      'exec',
+      '-m', 'gpt-5.3-codex',
+      prompt,
+    ], {
+      cwd: process.cwd(),
+      shell: true,
+    });
+
+    codex.stdout.on('data', (data: Buffer) => {
+      const text = data.toString();
+      result += text;
+      config.onToken('codex', text);
+    });
+
+    codex.stderr.on('data', (data: Buffer) => {
+      const text = data.toString();
+      result += text;
+      config.onToken('codex', text);
+    });
+
+    codex.on('close', (code) => {
+      if (code === 0 || result.trim()) {
+        resolve(result);
+      } else {
+        reject(new Error(`Codex CLI exited with code ${code}`));
+      }
+    });
+
+    codex.on('error', (err) => {
+      reject(new Error(`Codex CLI spawn error: ${err.message}`));
+    });
+
+    // Timeout after 120 seconds
+    setTimeout(() => {
+      codex.kill();
+      if (result.trim()) {
+        resolve(result);
+      } else {
+        reject(new Error('Codex CLI timed out after 120s'));
+      }
+    }, 120_000);
+  });
 }
 
 async function callAnthropic(
