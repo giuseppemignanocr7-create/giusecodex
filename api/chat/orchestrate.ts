@@ -78,7 +78,7 @@ async function streamOpenAI(
   const res = await fetch('https://api.openai.com/v1/chat/completions', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
-    body: JSON.stringify({ model, messages: [{ role: 'system', content: system }, ...msgs], max_tokens: 8192, stream: true }),
+    body: JSON.stringify({ model, messages: [{ role: 'system', content: system }, ...msgs], max_completion_tokens: 8192, stream: true }),
   });
   if (!res.ok) {
     const errText = await res.text().catch(() => 'Unknown error');

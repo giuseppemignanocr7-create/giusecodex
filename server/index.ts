@@ -179,7 +179,7 @@ Be concise and direct. Use markdown with code blocks.`;
         body: JSON.stringify({
           model: model || 'gpt-5.2',
           messages: [{ role: 'system', content: system }, ...messages],
-          max_tokens: 8192,
+          max_completion_tokens: 8192,
           stream: true,
         }),
       });

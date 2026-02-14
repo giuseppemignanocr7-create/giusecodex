@@ -330,6 +330,7 @@ async function callOpenAI(
     body: JSON.stringify({
       model,
       stream: true,
+      max_completion_tokens: 8192,
       messages: [
         { role: 'system', content: system },
         ...messages.map(m => ({ role: m.role as 'user' | 'assistant', content: m.content })),

@@ -82,6 +82,7 @@ export async function streamOpenAI(params: {
     body: JSON.stringify({
       model: params.model,
       stream: true,
+      max_completion_tokens: 8192,
       messages: [
         ...(params.systemPrompt ? [{ role: 'system', content: params.systemPrompt }] : []),
         ...params.messages.map(m => ({
