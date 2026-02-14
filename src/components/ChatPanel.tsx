@@ -10,6 +10,7 @@ import { withProjectContext, buildProjectContext } from '../lib/projectContext';
 import { MarkdownMessage } from './MarkdownMessage';
 import { MODELS, ASK_SYSTEM_PROMPT, CODE_SYSTEM_PROMPT, roleColors, roleLabels } from '../lib/constants';
 import type { ChatMode } from '../lib/constants';
+import { parseToolCalls, executeTool, formatToolResults, hasToolCalls, TOOL_DEFINITIONS } from '../lib/agentTools';
 
 const defaultStream = (): AgentStream => ({ agent: 'opus', content: '', status: 'idle', label: '' });
 
@@ -341,10 +342,28 @@ export function ChatPanel() {
     }
   };
 
+  const streamOnce = async (msgs: Array<{role: string; content: string}>, sysPrompt: string, settings: ReturnType<typeof useSettings.getState>, provider: string, abort: AbortController) => {
+    const onToken = (text: string) => appendToLast(text);
+    if (isElectronApp) {
+      if (provider === 'anthropic') {
+        await streamAnthropic({ messages: msgs, model: normalizedModel, systemPrompt: sysPrompt, apiKey, signal: abort.signal, onToken, maxTokens: settings.maxTokens, temperature: settings.temperature });
+      } else if (provider === 'openai' || provider === 'codex-cli') {
+        await streamOpenAI({ messages: msgs, model: provider === 'codex-cli' ? 'gpt-5.3-codex' : normalizedModel, systemPrompt: sysPrompt, apiKey: settings.openaiKey || apiKey, signal: abort.signal, onToken, maxTokens: settings.maxTokens, temperature: settings.temperature });
+      }
+    } else {
+      await streamViaServer({ messages: msgs, model: normalizedModel, apiKey, provider, systemPrompt: sysPrompt, openaiKey: settings.openaiKey, signal: abort.signal, onToken, maxTokens: settings.maxTokens, temperature: settings.temperature });
+    }
+  };
+
   const sendDirect = async (chatHistory: Array<{role: string; content: string}>, settings: ReturnType<typeof useSettings.getState>, systemPrompt: string) => {
     const modelInfo = MODELS.find(m => m.id === normalizedModel);
     const provider = modelInfo?.provider || 'anthropic';
     const assistantRole: AgentRole = provider === 'codex-cli' || provider === 'openai' ? 'codex' : normalizedModel.includes('haiku') ? 'haiku' : normalizedModel.includes('opus') ? 'opus' : 'sonnet';
+
+    // Inject tool definitions for code mode on localhost
+    const isLocal = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+    const sysPrompt = isLocal && chatMode === 'code' ? systemPrompt + TOOL_DEFINITIONS : systemPrompt;
+
     const assistantMsg: ChatMessage = {
       id: crypto.randomUUID(),
       role: assistantRole,
@@ -358,47 +377,36 @@ export function ChatPanel() {
     abortRef.current = abort;
 
     try {
-      const onToken = (text: string) => appendToLast(text);
+      await streamOnce(chatHistory, sysPrompt, settings, provider, abort);
 
-      if (isElectronApp) {
-        // Direct API calls in Electron (no server needed)
-        if (provider === 'anthropic') {
-          await streamAnthropic({
-            messages: chatHistory,
-            model: normalizedModel,
-            systemPrompt,
-            apiKey,
-            signal: abort.signal,
-            onToken,
-            maxTokens: settings.maxTokens,
-            temperature: settings.temperature,
-          });
-        } else if (provider === 'openai' || provider === 'codex-cli') {
-          await streamOpenAI({
-            messages: chatHistory,
-            model: provider === 'codex-cli' ? 'gpt-5.3-codex' : normalizedModel,
-            systemPrompt,
-            apiKey: settings.openaiKey || apiKey,
-            signal: abort.signal,
-            onToken,
-            maxTokens: settings.maxTokens,
-            temperature: settings.temperature,
-          });
+      // Agent tool loop (max 5 rounds)
+      if (isLocal && chatMode === 'code') {
+        let runningHistory = [...chatHistory];
+        for (let round = 0; round < 5; round++) {
+          const lastContent = useChat.getState().messages.at(-1)?.content || '';
+          if (!hasToolCalls(lastContent)) break;
+
+          const toolCalls = parseToolCalls(lastContent);
+          if (toolCalls.length === 0) break;
+
+          // Execute tools
+          appendToLast('\n\n---\n🔧 *Executing tools...*\n');
+          const results = await Promise.all(toolCalls.map(tc => executeTool(tc)));
+          const resultText = formatToolResults(results);
+          appendToLast(results.map(r => `- **${r.tool}**: ${r.success ? '✅' : '❌'} ${r.output.slice(0, 100)}`).join('\n'));
+
+          // Feed results back and get next response
+          runningHistory = [
+            ...runningHistory,
+            { role: 'assistant', content: lastContent },
+            { role: 'user', content: `Tool results:\n${resultText}\n\nContinue with the task based on these results.` },
+          ];
+
+          // Add new assistant message for next response
+          const nextMsg: ChatMessage = { id: crypto.randomUUID(), role: assistantRole, content: '', timestamp: Date.now(), model: normalizedModel };
+          addMessage(nextMsg);
+          await streamOnce(runningHistory, sysPrompt, settings, provider, abort);
         }
-      } else {
-        // Web mode: proxy through server
-        await streamViaServer({
-          messages: chatHistory,
-          model: normalizedModel,
-          apiKey,
-          provider,
-          systemPrompt,
-          openaiKey: settings.openaiKey,
-          signal: abort.signal,
-          onToken,
-          maxTokens: settings.maxTokens,
-          temperature: settings.temperature,
-        });
       }
     } catch (err: unknown) {
       if (err instanceof Error && err.name === 'AbortError') {

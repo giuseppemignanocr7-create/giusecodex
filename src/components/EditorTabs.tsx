@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef } from 'react';
 import { useFileStore } from '../stores/fileStore';
 import Editor from '@monaco-editor/react';
 import { X, Circle, FolderOpen, MessageSquare } from 'lucide-react';
+import { registerInlineCompletion } from '../lib/inlineCompletion';
 
 export function EditorTabs() {
   const { openFiles, activeFile, setActiveFile, closeFile, updateContent } = useFileStore();
@@ -90,6 +91,8 @@ export function EditorTabs() {
             onChange={(val) => updateContent(active.path, val || '')}
             onMount={(editor) => {
               editor.addCommand(2097 /* Ctrl+S */, () => handleSaveRef.current());
+              // Register inline AI completion (localhost only)
+              registerInlineCompletion(editor);
             }}
             options={{
               fontSize: 14,

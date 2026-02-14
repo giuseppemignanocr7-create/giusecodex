@@ -1,7 +1,11 @@
 import express from 'express';
 import cors from 'cors';
 import fs from 'fs/promises';
+import fsSync from 'fs';
 import path from 'path';
+import http from 'http';
+import { WebSocketServer, WebSocket } from 'ws';
+import { spawn, execSync as execSyncFn } from 'child_process';
 import Anthropic from '@anthropic-ai/sdk';
 import { orchestrate } from './orchestrator';
 
@@ -29,11 +33,10 @@ app.post('/api/set-root', (req, res) => {
 });
 
 // Auto-detect codex CLI availability
-import { execSync } from 'child_process';
 let codexAvailable = process.env.CODEX_AVAILABLE === '1';
 if (!codexAvailable) {
   try {
-    execSync('codex --version', { stdio: 'ignore' });
+    execSyncFn('codex --version', { stdio: 'ignore' });
     codexAvailable = true;
   } catch {
     codexAvailable = false;
@@ -380,11 +383,182 @@ if (staticDir) {
   });
 }
 
+// ──── Project Search API ────
+
+app.get('/api/files/search', async (req, res) => {
+  const query = (req.query.q as string || '').trim();
+  const ext = (req.query.ext as string || '').trim();
+  if (!query) return res.status(400).json({ error: 'q required' });
+
+  const results: Array<{ file: string; line: number; text: string }> = [];
+  const ignore = new Set(['node_modules', '.git', 'dist', 'out', '.next', '__pycache__', '.vscode']);
+  const binaryExts = new Set(['png', 'jpg', 'jpeg', 'gif', 'ico', 'woff', 'woff2', 'ttf', 'eot', 'pdf', 'zip', 'tar', 'gz']);
+  const MAX_RESULTS = 200;
+
+  async function searchDir(dir: string, depth: number): Promise<void> {
+    if (depth > 6 || results.length >= MAX_RESULTS) return;
+    let entries;
+    try { entries = await fs.readdir(dir, { withFileTypes: true }); } catch { return; }
+    for (const entry of entries) {
+      if (results.length >= MAX_RESULTS) break;
+      if (ignore.has(entry.name) || entry.name.startsWith('.')) continue;
+      const full = path.join(dir, entry.name);
+      if (entry.isDirectory()) {
+        await searchDir(full, depth + 1);
+      } else {
+        const fileExt = entry.name.split('.').pop()?.toLowerCase() || '';
+        if (binaryExts.has(fileExt)) continue;
+        if (ext && fileExt !== ext.replace('.', '')) continue;
+        try {
+          const content = await fs.readFile(full, 'utf-8');
+          const lines = content.split('\n');
+          for (let i = 0; i < lines.length && results.length < MAX_RESULTS; i++) {
+            if (lines[i].toLowerCase().includes(query.toLowerCase())) {
+              results.push({ file: path.relative(PROJECT_ROOT, full), line: i + 1, text: lines[i].trim().slice(0, 200) });
+            }
+          }
+        } catch { /* skip unreadable */ }
+      }
+    }
+  }
+
+  try {
+    await searchDir(PROJECT_ROOT, 0);
+    res.json({ results, truncated: results.length >= MAX_RESULTS });
+  } catch (err: unknown) {
+    res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+// ──── Terminal Exec (for agent tool loop) ────
+
+app.post('/api/terminal/exec', (req, res) => {
+  const { command, timeout = 15000 } = req.body;
+  if (!command) return res.status(400).json({ error: 'command required' });
+
+  const isWin = process.platform === 'win32';
+  const shell = isWin ? 'powershell.exe' : '/bin/bash';
+  const args = isWin ? ['-NoProfile', '-Command', command] : ['-c', command];
+
+  let stdout = '';
+  let stderr = '';
+  const child = spawn(shell, args, { cwd: PROJECT_ROOT, shell: false, timeout: timeout as number });
+
+  child.stdout.on('data', (d: Buffer) => { stdout += d.toString(); });
+  child.stderr.on('data', (d: Buffer) => { stderr += d.toString(); });
+  child.on('close', (code) => {
+    res.json({ exitCode: code, stdout: stdout.slice(0, 50000), stderr: stderr.slice(0, 10000) });
+  });
+  child.on('error', (err: Error) => {
+    res.status(500).json({ error: err.message });
+  });
+});
+
+// ──── Git API ────
+
+function runGit(args: string[]): Promise<{ code: number; stdout: string; stderr: string }> {
+  return new Promise((resolve) => {
+    const child = spawn('git', args, { cwd: PROJECT_ROOT, shell: false });
+    let stdout = '';
+    let stderr = '';
+    child.stdout.on('data', (d: Buffer) => { stdout += d.toString(); });
+    child.stderr.on('data', (d: Buffer) => { stderr += d.toString(); });
+    child.on('close', (code) => resolve({ code: code ?? 1, stdout, stderr }));
+    child.on('error', (err: Error) => resolve({ code: 1, stdout: '', stderr: err.message }));
+  });
+}
+
+app.get('/api/git/status', async (_req, res) => {
+  const r = await runGit(['status', '--porcelain']);
+  if (r.code !== 0 && r.stderr.includes('not a git repository')) {
+    return res.json({ isRepo: false, files: [] });
+  }
+  const files = r.stdout.trim().split('\n').filter(Boolean).map(line => ({
+    status: line.slice(0, 2).trim(),
+    file: line.slice(3),
+  }));
+  const branch = await runGit(['branch', '--show-current']);
+  res.json({ isRepo: true, branch: branch.stdout.trim(), files });
+});
+
+app.post('/api/git/commit', async (req, res) => {
+  const { message } = req.body;
+  if (!message) return res.status(400).json({ error: 'message required' });
+  await runGit(['add', '-A']);
+  const r = await runGit(['commit', '-m', message]);
+  res.json({ ok: r.code === 0, output: r.stdout + r.stderr });
+});
+
+app.post('/api/git/push', async (_req, res) => {
+  const r = await runGit(['push']);
+  res.json({ ok: r.code === 0, output: r.stdout + r.stderr });
+});
+
+app.get('/api/git/log', async (_req, res) => {
+  const r = await runGit(['log', '--oneline', '-20']);
+  const commits = r.stdout.trim().split('\n').filter(Boolean).map(line => {
+    const [hash, ...rest] = line.split(' ');
+    return { hash, message: rest.join(' ') };
+  });
+  res.json({ commits });
+});
+
+app.get('/api/git/diff', async (req, res) => {
+  const file = req.query.file as string;
+  const args = file ? ['diff', '--', file] : ['diff'];
+  const r = await runGit(args);
+  res.json({ diff: r.stdout });
+});
+
 // ──── Start ────
 
 const PORT = parseInt(process.env.PORT || '4000');
 const HOST = process.env.HOST || '127.0.0.1';
-app.listen(PORT, HOST, () => {
+const server = http.createServer(app);
+
+// ──── WebSocket Terminal ────
+
+const wss = new WebSocketServer({ server, path: '/ws/terminal' });
+
+wss.on('connection', (ws: WebSocket) => {
+  const isWin = process.platform === 'win32';
+  const shell = isWin ? 'powershell.exe' : '/bin/bash';
+  const shellArgs = isWin ? ['-NoProfile', '-NoLogo'] : [];
+
+  const pty = spawn(shell, shellArgs, {
+    cwd: PROJECT_ROOT,
+    shell: false,
+    env: { ...process.env, TERM: 'xterm-256color' },
+    stdio: ['pipe', 'pipe', 'pipe'],
+  });
+
+  pty.stdout.on('data', (data: Buffer) => {
+    if (ws.readyState === WebSocket.OPEN) ws.send(data);
+  });
+  pty.stderr.on('data', (data: Buffer) => {
+    if (ws.readyState === WebSocket.OPEN) ws.send(data);
+  });
+
+  ws.on('message', (msg: Buffer | string) => {
+    const text = msg.toString();
+    // Handle resize messages
+    if (text.startsWith('\x01RESIZE:')) {
+      // Resize not supported with spawn (would need node-pty)
+      return;
+    }
+    pty.stdin.write(text);
+  });
+
+  ws.on('close', () => {
+    pty.kill();
+  });
+
+  pty.on('close', () => {
+    if (ws.readyState === WebSocket.OPEN) ws.close();
+  });
+});
+
+server.listen(PORT, HOST, () => {
   console.log(`GiuseCoder server running on http://${HOST}:${PORT}`);
   console.log(`Project root: ${PROJECT_ROOT}`);
   console.log(`Code agent: ${codexAvailable ? 'GPT 5.3 Codex (CLI)' : 'GPT 5.2 (API fallback)'}`);
