@@ -175,6 +175,9 @@ export function ChatPanel() {
       const decoder = new TextDecoder();
       let buffer = '';
       let finalContent = '';
+      let accCodex = '';
+      let accSonnet = '';
+      let accReview = '';
 
       while (true) {
         const { done, value } = await reader.read();
@@ -202,16 +205,19 @@ export function ChatPanel() {
               }
             } else if (event.type === 'token') {
               if (event.agent === 'sonnet') {
+                accSonnet += event.text;
                 setSonnetStream(prev => ({ ...prev, content: prev.content + event.text }));
               } else if (event.agent === 'codex') {
+                accCodex += event.text;
                 setCodexStream(prev => ({ ...prev, content: prev.content + event.text }));
               } else if (event.agent === 'opus') {
-                // Route opus tokens to review panel if review is running, otherwise to analysis
                 setOpusReview(prev => {
-                  if (prev.status === 'running') return { ...prev, content: prev.content + event.text };
+                  if (prev.status === 'running') {
+                    accReview += event.text;
+                    return { ...prev, content: prev.content + event.text };
+                  }
                   return prev;
                 });
-                // Only route to analysis if review is NOT running
                 setOpusAnalysis(prev => {
                   if (prev.status === 'running') return { ...prev, content: prev.content + event.text };
                   return prev;
@@ -230,16 +236,21 @@ export function ChatPanel() {
         }
       }
 
-      if (finalContent.trim()) {
+      // Combine all available content for editor and chat
+      const bestContent = finalContent.trim() || accReview.trim() || [accCodex, accSonnet].filter(Boolean).join('\n\n');
+
+      if (bestContent) {
         addMessage({
           id: crypto.randomUUID(),
           role: 'opus',
-          content: finalContent,
+          content: bestContent,
           timestamp: Date.now(),
           model: 'claude-opus-4-6',
         });
-        // Auto-open generated code in editor
-        openCodeInEditor(finalContent);
+        // Open code in editor from all sources (try each until one works)
+        openCodeInEditor(bestContent);
+        if (accCodex.trim()) openCodeInEditor(accCodex);
+        if (accSonnet.trim()) openCodeInEditor(accSonnet);
       }
     } catch (err: unknown) {
       setOpusReview(prev => ({ ...prev, content: `**Error:** ${err instanceof Error ? err.message : 'Unknown error'}`, status: 'error' }));

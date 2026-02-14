@@ -25,10 +25,8 @@ const EXT_LANG: Record<string, string> = {
 
 /**
  * Extract code blocks from markdown content.
- * Detects ```lang blocks and optional file path comments like:
- *   // filename.ts
- *   <!-- filename.html -->
- *   # filename.py
+ * Detects ```lang blocks and optional file path comments.
+ * Falls back to detecting raw HTML/code if no fenced blocks found.
  */
 export function extractCodeBlocks(markdown: string): ExtractedFile[] {
   const files: ExtractedFile[] = [];
@@ -44,35 +42,36 @@ export function extractCodeBlocks(markdown: string): ExtractedFile[] {
 
     if (!code || code.length < 5) continue;
 
-    // Determine file name
     let fileName = filePathHint;
     if (!fileName) {
-      // Check first line of code for file path pattern
       const firstLine = code.split('\n')[0];
       const pathMatch = firstLine.match(/^(?:\/\/|#|\/\*|<!--)\s*(?:file:\s*)?(\S+\.\w+)/);
-      if (pathMatch) {
-        fileName = pathMatch[1];
-      }
+      if (pathMatch) fileName = pathMatch[1];
     }
 
     if (!fileName) {
-      // Generate name from language
       const ext = LANG_EXT[lang] || lang || 'txt';
       index++;
       fileName = `generated-${index}.${ext}`;
     }
 
-    // Clean file name
     const name = fileName.split('/').pop() || fileName;
     const ext = name.split('.').pop()?.toLowerCase() || '';
     const language = EXT_LANG[ext] || lang || 'plaintext';
 
-    files.push({
-      path: `generated/${fileName}`,
-      name,
-      content: code,
-      language,
-    });
+    files.push({ path: `generated/${fileName}`, name, content: code, language });
+  }
+
+  // Fallback: if no fenced code blocks, try to detect raw HTML or code
+  if (files.length === 0) {
+    // Check for raw HTML content
+    const htmlMatch = markdown.match(/(<(!DOCTYPE|html)[\s\S]*<\/(html|body)>)/i);
+    if (htmlMatch) {
+      files.push({ path: 'generated/index.html', name: 'index.html', content: htmlMatch[1].trim(), language: 'html' });
+    } else if (/<(div|section|main|header|body|head|style|script)[\s>]/i.test(markdown) && markdown.length > 50) {
+      // Partial HTML
+      files.push({ path: 'generated/index.html', name: 'index.html', content: markdown.trim(), language: 'html' });
+    }
   }
 
   return files;
