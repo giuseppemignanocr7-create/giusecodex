@@ -16,14 +16,11 @@ You write clean, idiomatic, production-ready code.
 When modifying code, output the complete changed code with file paths.
 Be concise and direct. Use markdown with code blocks.`;
 
-// Detect if running in Electron (has Codex CLI for GPT 5.3)
-const isElectron = typeof window !== 'undefined' && !!(window as any).giuseCoder?.isElectron;
-
 const MODELS = [
   { id: 'claude-opus-4-6', label: 'Opus 4.6', desc: 'CTO reasoning', color: 'text-purple', provider: 'anthropic' },
   { id: 'claude-sonnet-4-5-20250929', label: 'Sonnet 4.5', desc: 'UI/Design', color: 'text-accent', provider: 'anthropic' },
   { id: 'claude-haiku-4-5-20251001', label: 'Haiku 4.5', desc: 'Fast', color: 'text-green', provider: 'anthropic' },
-  ...(isElectron ? [{ id: 'gpt-5.3-codex', label: 'GPT 5.3 Codex', desc: 'Local CLI', color: 'text-yellow', provider: 'codex-cli' as const }] : []),
+  ...(isElectronApp ? [{ id: 'gpt-5.3-codex', label: 'GPT 5.3 Codex', desc: 'Local CLI', color: 'text-yellow', provider: 'codex-cli' as const }] : []),
   { id: 'gpt-5.2', label: 'GPT 5.2', desc: 'Best code via API', color: 'text-yellow', provider: 'openai' },
   { id: 'o3', label: 'o3', desc: 'Reasoning', color: 'text-yellow', provider: 'openai' },
 ];
@@ -49,7 +46,16 @@ const roleLabels: Record<AgentRole, string> = {
 const defaultStream = (): AgentStream => ({ agent: 'opus', content: '', status: 'idle', label: '' });
 
 export function ChatPanel() {
-  const { messages, isStreaming, currentModel, apiKey, totalCost, addMessage, setStreaming, setModel, setApiKey, appendToLast, clearMessages } = useChat();
+  const messages = useChat(s => s.messages);
+  const isStreaming = useChat(s => s.isStreaming);
+  const currentModel = useChat(s => s.currentModel);
+  const apiKey = useChat(s => s.apiKey);
+  const totalCost = useChat(s => s.totalCost);
+  const addMessage = useChat(s => s.addMessage);
+  const setStreaming = useChat(s => s.setStreaming);
+  const setModel = useChat(s => s.setModel);
+  const appendToLast = useChat(s => s.appendToLast);
+  const clearMessages = useChat(s => s.clearMessages);
   const projects = useProjects();
   const [input, setInput] = useState('');
   const [showModelPicker, setShowModelPicker] = useState(false);
@@ -167,17 +173,23 @@ export function ChatPanel() {
       return;
     }
 
-    if (!apiKey) {
-      useSettings.getState().setOpen(true);
+    // Check API key for the selected provider
+    const selectedModelInfo = MODELS.find(m => m.id === normalizedModel);
+    const provider = selectedModelInfo?.provider || 'anthropic';
+    const settings = useSettings.getState();
+    const needsAnthropicKey = provider === 'anthropic';
+    const needsOpenaiKey = provider === 'openai' || provider === 'codex-cli';
+
+    if (needsAnthropicKey && !apiKey) {
+      addMessage({ id: crypto.randomUUID(), role: 'system', content: '⚠️ **Anthropic API key mancante.** Vai in Settings (⚙️) per inserirla.', timestamp: Date.now() });
+      setInput('');
+      settings.setOpen(true);
       return;
     }
-
-    // Warn if OpenAI model selected without OpenAI key
-    const selectedModelInfo = MODELS.find(m => m.id === normalizedModel);
-    if (selectedModelInfo?.provider === 'openai' && !useSettings.getState().openaiKey) {
-      addMessage({ id: crypto.randomUUID(), role: 'system', content: '⚠️ **OpenAI API key mancante.** Vai in Settings (⚙️) e inserisci la tua OpenAI key per usare GPT 5.2.', timestamp: Date.now() });
+    if (needsOpenaiKey && !settings.openaiKey) {
+      addMessage({ id: crypto.randomUUID(), role: 'system', content: '⚠️ **OpenAI API key mancante.** Vai in Settings (⚙️) e inserisci la tua OpenAI key per usare questo modello.', timestamp: Date.now() });
       setInput('');
-      useSettings.getState().setOpen(true);
+      settings.setOpen(true);
       return;
     }
 
@@ -191,16 +203,20 @@ export function ChatPanel() {
     setInput('');
     setStreaming(true);
 
-    const settings = useSettings.getState();
     const orchestratorEnabled = settings.orchestratorEnabled;
     const shouldRunOrchestrator = orchestratorEnabled && !isElectronApp && chatMode === 'code';
 
-    // Pre-check: orchestrator needs OpenAI key for code gen
-    if (shouldRunOrchestrator && !settings.openaiKey) {
-      addMessage({ id: crypto.randomUUID(), role: 'system', content: '⚠️ **OpenAI API key mancante.** L\'orchestrator ha bisogno della chiave OpenAI per GPT 5.2 (code generation).\nVai in Settings (⚙️) per inserirla, oppure disabilita l\'orchestrator per usare un modello Anthropic direttamente.', timestamp: Date.now() });
-      setInput('');
+    // Pre-check: orchestrator needs both keys
+    if (shouldRunOrchestrator && !apiKey) {
+      addMessage({ id: crypto.randomUUID(), role: 'system', content: '⚠️ **Anthropic API key mancante.** L\'orchestrator ha bisogno della chiave Anthropic per Opus/Sonnet.\nVai in Settings (⚙️) per inserirla.', timestamp: Date.now() });
       setStreaming(false);
-      useSettings.getState().setOpen(true);
+      settings.setOpen(true);
+      return;
+    }
+    if (shouldRunOrchestrator && !settings.openaiKey) {
+      addMessage({ id: crypto.randomUUID(), role: 'system', content: '⚠️ **OpenAI API key mancante.** L\'orchestrator ha bisogno della chiave OpenAI per GPT 5.2 (code generation).\nVai in Settings (⚙️) per inserirla, oppure disabilita l\'orchestrator.', timestamp: Date.now() });
+      setStreaming(false);
+      settings.setOpen(true);
       return;
     }
     const systemPrompt = withProjectContext(chatMode === 'ask' ? ASK_SYSTEM_PROMPT : CODE_SYSTEM_PROMPT);
@@ -386,6 +402,8 @@ export function ChatPanel() {
             apiKey,
             signal: abort.signal,
             onToken,
+            maxTokens: settings.maxTokens,
+            temperature: settings.temperature,
           });
         } else if (provider === 'openai' || provider === 'codex-cli') {
           await streamOpenAI({
@@ -395,6 +413,8 @@ export function ChatPanel() {
             apiKey: settings.openaiKey || apiKey,
             signal: abort.signal,
             onToken,
+            maxTokens: settings.maxTokens,
+            temperature: settings.temperature,
           });
         }
       } else {
@@ -408,6 +428,8 @@ export function ChatPanel() {
           openaiKey: settings.openaiKey,
           signal: abort.signal,
           onToken,
+          maxTokens: settings.maxTokens,
+          temperature: settings.temperature,
         });
       }
     } catch (err: unknown) {

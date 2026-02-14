@@ -115,7 +115,13 @@ export default async function handler(req: Request) {
     return new Response(JSON.stringify({ error: 'Method not allowed' }), { status: 405 });
   }
 
-  const { messages, anthropicKey, openaiKey, chatMode, projectContext } = await req.json();
+  let body: any;
+  try {
+    body = await req.json();
+  } catch {
+    return new Response(JSON.stringify({ error: 'Invalid JSON body' }), { status: 400 });
+  }
+  const { messages, anthropicKey, openaiKey, chatMode, projectContext } = body;
   if (!anthropicKey) {
     return new Response(JSON.stringify({ error: 'Anthropic API key required' }), { status: 400 });
   }

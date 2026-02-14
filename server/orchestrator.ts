@@ -220,23 +220,6 @@ export async function orchestrate(
   }
 }
 
-// ──── Helpers ────
-
-function buildReviewPrompt(plan: TaskPlan, results: { design?: string; code?: string }, codeAgent: string): string {
-  let prompt = `Here are the outputs from the team:\n\n`;
-  prompt += `**Task Analysis:** ${plan.summary}\n\n`;
-
-  if (results.design) {
-    prompt += `## Sonnet's UI/Design Output:\n${results.design}\n\n`;
-  }
-  if (results.code) {
-    prompt += `## ${codeAgent} Code Output:\n${results.code}\n\n`;
-  }
-
-  prompt += `Please combine these into a single, polished response for the user. Resolve any conflicts and present the complete solution.`;
-  return prompt;
-}
-
 // ──── Codex CLI (GPT 5.3 via ChatGPT auth) ────
 
 function callCodexCLI(prompt: string, config: OrchestratorConfig): Promise<string> {
@@ -245,10 +228,11 @@ function callCodexCLI(prompt: string, config: OrchestratorConfig): Promise<strin
     const codex = spawn('codex', [
       'exec',
       '-m', 'gpt-5.3-codex',
+      '--',
       prompt,
     ], {
       cwd: process.cwd(),
-      shell: true,
+      shell: false,
     });
 
     codex.stdout.on('data', (data: Buffer) => {

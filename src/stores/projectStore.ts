@@ -112,6 +112,7 @@ export const useProjects = create<ProjectStore>((set, get) => ({
     );
     const active = updated.find(p => p.id === activeProjectId) || null;
     set({ projects: updated, activeProject: active });
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
   },
 
   addOrchestratorSession: (session: OrchestratorSession) => {
@@ -142,6 +143,7 @@ export const useProjects = create<ProjectStore>((set, get) => ({
     );
     const active = updated.find(p => p.id === activeProjectId) || null;
     set({ projects: updated, activeProject: active });
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
   },
 
   save: () => {

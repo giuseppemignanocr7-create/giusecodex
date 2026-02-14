@@ -9,6 +9,25 @@ const app = express();
 app.use(cors());
 app.use(express.json({ limit: '10mb' }));
 
+// ──── Path sandboxing ────
+let PROJECT_ROOT = process.cwd();
+
+function safePath(userPath: string): string | null {
+  if (!userPath) return null;
+  const resolved = path.resolve(PROJECT_ROOT, userPath);
+  // Ensure the resolved path is inside the project root
+  if (!resolved.startsWith(PROJECT_ROOT)) return null;
+  return resolved;
+}
+
+// Allow overriding root via POST /api/set-root (only from localhost)
+app.post('/api/set-root', (req, res) => {
+  const { root } = req.body;
+  if (!root) return res.status(400).json({ error: 'root required' });
+  PROJECT_ROOT = path.resolve(root);
+  res.json({ ok: true, root: PROJECT_ROOT });
+});
+
 // Auto-detect codex CLI availability
 import { execSync } from 'child_process';
 let codexAvailable = process.env.CODEX_AVAILABLE === '1';
@@ -30,7 +49,9 @@ if (staticDir) {
 // ──── File System API ────
 
 app.get('/api/files/tree', async (req, res) => {
-  const dirPath = (req.query.path as string) || '.';
+  const raw = (req.query.path as string) || '.';
+  const dirPath = safePath(raw);
+  if (!dirPath) return res.status(403).json({ error: 'Path outside project root' });
   try {
     const tree = await buildTree(dirPath, 0);
     res.json(tree);
@@ -72,8 +93,10 @@ async function buildTree(dirPath: string, depth: number): Promise<TreeNode[]> {
 }
 
 app.get('/api/files/read', async (req, res) => {
-  const filePath = req.query.path as string;
-  if (!filePath) return res.status(400).json({ error: 'path required' });
+  const raw = req.query.path as string;
+  if (!raw) return res.status(400).json({ error: 'path required' });
+  const filePath = safePath(raw);
+  if (!filePath) return res.status(403).json({ error: 'Path outside project root' });
   try {
     const content = await fs.readFile(filePath, 'utf-8');
     res.json({ content });
@@ -83,8 +106,10 @@ app.get('/api/files/read', async (req, res) => {
 });
 
 app.post('/api/files/write', async (req, res) => {
-  const { path: filePath, content } = req.body;
-  if (!filePath) return res.status(400).json({ error: 'path required' });
+  const { path: rawPath, content } = req.body;
+  if (!rawPath) return res.status(400).json({ error: 'path required' });
+  const filePath = safePath(rawPath);
+  if (!filePath) return res.status(403).json({ error: 'Path outside project root' });
   try {
     await fs.mkdir(path.dirname(filePath), { recursive: true });
     await fs.writeFile(filePath, content, 'utf-8');
@@ -95,7 +120,9 @@ app.post('/api/files/write', async (req, res) => {
 });
 
 app.post('/api/files/create', async (req, res) => {
-  const { path: filePath, type } = req.body;
+  const { path: rawPath, type } = req.body;
+  const filePath = safePath(rawPath);
+  if (!filePath) return res.status(403).json({ error: 'Path outside project root' });
   try {
     if (type === 'directory') {
       await fs.mkdir(filePath, { recursive: true });
@@ -110,7 +137,12 @@ app.post('/api/files/create', async (req, res) => {
 });
 
 app.delete('/api/files/delete', async (req, res) => {
-  const filePath = req.query.path as string;
+  const raw = req.query.path as string;
+  if (!raw) return res.status(400).json({ error: 'path required' });
+  const filePath = safePath(raw);
+  if (!filePath) return res.status(403).json({ error: 'Path outside project root' });
+  // Prevent deleting the project root itself
+  if (filePath === PROJECT_ROOT) return res.status(403).json({ error: 'Cannot delete project root' });
   try {
     await fs.rm(filePath, { recursive: true });
     res.json({ ok: true });
@@ -260,10 +292,11 @@ app.post('/api/chat/codex', async (req, res) => {
   const codex = spawn('codex', [
     'exec',
     '-m', model || 'gpt-5.3-codex',
+    '--',
     prompt,
   ], {
     cwd: process.cwd(),
-    shell: true,
+    shell: false,
   });
 
   codex.stdout.on('data', (data: Buffer) => {
@@ -350,7 +383,9 @@ if (staticDir) {
 // ──── Start ────
 
 const PORT = parseInt(process.env.PORT || '4000');
-app.listen(PORT, () => {
-  console.log(`GiuseCoder server running on http://localhost:${PORT}`);
+const HOST = process.env.HOST || '127.0.0.1';
+app.listen(PORT, HOST, () => {
+  console.log(`GiuseCoder server running on http://${HOST}:${PORT}`);
+  console.log(`Project root: ${PROJECT_ROOT}`);
   console.log(`Code agent: ${codexAvailable ? 'GPT 5.3 Codex (CLI)' : 'GPT 5.2 (API fallback)'}`);
 });

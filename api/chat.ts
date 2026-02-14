@@ -5,11 +5,20 @@ export default async function handler(req: Request) {
     return new Response(JSON.stringify({ error: 'Method not allowed' }), { status: 405 });
   }
 
-  const { messages, model, apiKey, systemPrompt, provider } = await req.json();
+  let body: any;
+  try {
+    body = await req.json();
+  } catch {
+    return new Response(JSON.stringify({ error: 'Invalid JSON body' }), { status: 400 });
+  }
+  const { messages, model, apiKey, systemPrompt, provider, maxTokens, temperature } = body;
 
   if (!apiKey) {
     return new Response(JSON.stringify({ error: 'API key required' }), { status: 400 });
   }
+
+  const tokenLimit = maxTokens || 8192;
+  const temp = temperature ?? 0.2;
 
   const system = systemPrompt || `You are GiuseCoder, a premium AI coding assistant.
 You write clean, idiomatic, production-ready code.
@@ -24,7 +33,8 @@ Be concise and direct. Use markdown with code blocks.`;
         body: JSON.stringify({
           model: model || 'gpt-5.2',
           messages: [{ role: 'system', content: system }, ...messages],
-          max_completion_tokens: 8192,
+          max_completion_tokens: tokenLimit,
+          temperature: temp,
           stream: true,
         }),
       });
@@ -78,7 +88,8 @@ Be concise and direct. Use markdown with code blocks.`;
         },
         body: JSON.stringify({
           model: model || 'claude-opus-4-6',
-          max_tokens: 8192,
+          max_tokens: tokenLimit,
+          temperature: temp,
           system,
           messages,
           stream: true,

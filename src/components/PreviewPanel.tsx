@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback, useMemo, useEffect } from 'react';
+import { useState, useRef, useCallback, useEffect } from 'react';
 import { RefreshCw, Globe, Monitor, Tablet, Smartphone, Maximize2, Play, Link } from 'lucide-react';
 import { useFileStore } from '../stores/fileStore';
 import { useChat } from '../stores/chatStore';
@@ -89,16 +89,24 @@ export function PreviewPanel() {
     return () => window.removeEventListener('gc:show-preview', onShowPreview);
   }, []);
 
-  // Auto-generate preview content from open files or chat
-  const autoContent = useMemo(() => {
-    // First try open files (combine HTML+CSS+JS from same project)
-    const fromFiles = buildFromOpenFiles(openFiles, activeFile);
-    if (fromFiles) return fromFiles;
-    // Then try chat messages
-    const fromChat = extractHtmlFromMessages(chatMessages);
-    if (fromChat) return fromChat;
-    return null;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+  // Debounced auto-generate preview content (avoids recalc on every keystroke)
+  const [autoContent, setAutoContent] = useState<string | null>(null);
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    // Immediate update on refreshKey change or chat message change
+    const compute = () => {
+      const fromFiles = buildFromOpenFiles(openFiles, activeFile);
+      if (fromFiles) { setAutoContent(fromFiles); return; }
+      const fromChat = extractHtmlFromMessages(chatMessages);
+      if (fromChat) { setAutoContent(fromChat); return; }
+      setAutoContent(null);
+    };
+
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(compute, 500);
+
+    return () => { if (debounceRef.current) clearTimeout(debounceRef.current); };
   }, [openFiles, activeFile, chatMessages, refreshKey]);
 
   const hasContent = previewMode === 'auto' ? !!autoContent : !!url;
@@ -236,7 +244,7 @@ export function PreviewPanel() {
               className="w-full border-0"
               style={{ height: device === 'mobile' ? 'calc(100% - 20px)' : device === 'tablet' ? 'calc(100% - 12px)' : '100%' }}
               title="Preview"
-              sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
+              sandbox="allow-scripts allow-forms allow-popups"
             />
           </div>
         ) : (

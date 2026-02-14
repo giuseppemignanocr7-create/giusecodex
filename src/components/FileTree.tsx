@@ -159,10 +159,12 @@ export function FileTree() {
       handleMap.set('', rootHandleRef.current);
       const children = await readDirHandle(rootHandleRef.current, '');
       setTree(children);
-    } else if (projectPath) {
+    } else {
       const currentPath = useFileStore.getState().projectPath;
-      const data = await fetchTreeServer(currentPath);
-      setTree(data);
+      if (currentPath) {
+        const data = await fetchTreeServer(currentPath);
+        setTree(data);
+      }
     }
   }, [setTree]);
 
@@ -177,7 +179,7 @@ export function FileTree() {
       window.removeEventListener('gc:open-folder', onOpenFolder as EventListener);
       window.removeEventListener('gc:refresh-tree', onRefreshTree as EventListener);
     };
-  }, [projectPath]);
+  }, [handleOpenFolder, handleRefresh]);
 
   return (
     <div className="h-full flex flex-col bg-surface">

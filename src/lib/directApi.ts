@@ -11,6 +11,8 @@ export async function streamAnthropic(params: {
   apiKey: string;
   signal?: AbortSignal;
   onToken: (text: string) => void;
+  maxTokens?: number;
+  temperature?: number;
 }): Promise<void> {
   const res = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
@@ -22,7 +24,8 @@ export async function streamAnthropic(params: {
     },
     body: JSON.stringify({
       model: params.model,
-      max_tokens: 8192,
+      max_tokens: params.maxTokens || 8192,
+      temperature: params.temperature ?? 0.2,
       stream: true,
       system: params.systemPrompt,
       messages: params.messages.map(m => ({
@@ -72,6 +75,8 @@ export async function streamOpenAI(params: {
   apiKey: string;
   signal?: AbortSignal;
   onToken: (text: string) => void;
+  maxTokens?: number;
+  temperature?: number;
 }): Promise<void> {
   const res = await fetch('https://api.openai.com/v1/chat/completions', {
     method: 'POST',
@@ -82,7 +87,8 @@ export async function streamOpenAI(params: {
     body: JSON.stringify({
       model: params.model,
       stream: true,
-      max_completion_tokens: 8192,
+      max_completion_tokens: params.maxTokens || 8192,
+      temperature: params.temperature ?? 0.2,
       messages: [
         ...(params.systemPrompt ? [{ role: 'system', content: params.systemPrompt }] : []),
         ...params.messages.map(m => ({
@@ -134,6 +140,8 @@ export async function streamViaServer(params: {
   openaiKey?: string;
   signal?: AbortSignal;
   onToken: (text: string) => void;
+  maxTokens?: number;
+  temperature?: number;
 }): Promise<void> {
   const res = await fetch('/api/chat', {
     method: 'POST',
@@ -144,6 +152,8 @@ export async function streamViaServer(params: {
       apiKey: params.provider === 'openai' ? params.openaiKey : params.apiKey,
       provider: params.provider,
       systemPrompt: params.systemPrompt,
+      maxTokens: params.maxTokens,
+      temperature: params.temperature,
     }),
     signal: params.signal,
   });
