@@ -8,40 +8,8 @@ import { isElectronApp, streamAnthropic, streamOpenAI, streamViaServer } from '.
 import { openCodeInEditor } from '../lib/codeExtractor';
 import { withProjectContext, buildProjectContext } from '../lib/projectContext';
 import { MarkdownMessage } from './MarkdownMessage';
-
-type ChatMode = 'code' | 'ask';
-const ASK_SYSTEM_PROMPT = 'You are GiuseCoder, a helpful coding assistant. The user is in ASK mode — answer questions, explain concepts, review code, and provide guidance. Do NOT generate new code unless explicitly asked. Focus on clear explanations.';
-const CODE_SYSTEM_PROMPT = `You are GiuseCoder, a premium AI coding assistant.
-You write clean, idiomatic, production-ready code.
-When modifying code, output the complete changed code with file paths.
-Be concise and direct. Use markdown with code blocks.`;
-
-const MODELS = [
-  { id: 'claude-opus-4-6', label: 'Opus 4.6', desc: 'CTO reasoning', color: 'text-purple', provider: 'anthropic' },
-  { id: 'claude-sonnet-4-5-20250929', label: 'Sonnet 4.5', desc: 'UI/Design', color: 'text-accent', provider: 'anthropic' },
-  { id: 'claude-haiku-4-5-20251001', label: 'Haiku 4.5', desc: 'Fast', color: 'text-green', provider: 'anthropic' },
-  ...(isElectronApp ? [{ id: 'gpt-5.3-codex', label: 'GPT 5.3 Codex', desc: 'Local CLI', color: 'text-yellow', provider: 'codex-cli' as const }] : []),
-  { id: 'gpt-5.2', label: 'GPT 5.2', desc: 'Best code via API', color: 'text-yellow', provider: 'openai' },
-  { id: 'o3', label: 'o3', desc: 'Reasoning', color: 'text-yellow', provider: 'openai' },
-];
-
-const roleColors: Record<AgentRole, string> = {
-  haiku: 'border-l-green',
-  sonnet: 'border-l-accent',
-  opus: 'border-l-purple',
-  codex: 'border-l-yellow',
-  user: 'border-l-yellow',
-  system: 'border-l-muted',
-};
-
-const roleLabels: Record<AgentRole, string> = {
-  haiku: 'Haiku 4.5',
-  sonnet: 'Sonnet 4.5',
-  opus: 'Opus 4.6',
-  codex: 'GPT 5.2',
-  user: 'You',
-  system: 'System',
-};
+import { MODELS, ASK_SYSTEM_PROMPT, CODE_SYSTEM_PROMPT, roleColors, roleLabels } from '../lib/constants';
+import type { ChatMode } from '../lib/constants';
 
 const defaultStream = (): AgentStream => ({ agent: 'opus', content: '', status: 'idle', label: '' });
 

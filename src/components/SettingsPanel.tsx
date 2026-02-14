@@ -2,17 +2,7 @@ import { useState, useEffect } from 'react';
 import { useSettings } from '../stores/settingsStore';
 import { useChat } from '../stores/chatStore';
 import { X, Check, AlertCircle, Loader2, Save, Eye, EyeOff, Zap } from 'lucide-react';
-
-const isElectron = typeof window !== 'undefined' && (window as any).giuseCoder?.isElectron;
-
-const MODELS = [
-  { id: 'claude-opus-4-6', label: 'Opus 4.6', desc: 'CTO reasoning — Anthropic API key', color: 'bg-purple' },
-  { id: 'claude-sonnet-4-5-20250929', label: 'Sonnet 4.5', desc: 'UI/design — Anthropic API key', color: 'bg-accent' },
-  { id: 'claude-haiku-4-5-20251001', label: 'Haiku 4.5', desc: 'Fast triage — Anthropic API key', color: 'bg-green' },
-  ...(isElectron ? [{ id: 'gpt-5.3-codex', label: 'GPT 5.3 Codex', desc: 'Code gen — Local Codex CLI', color: 'bg-yellow' }] : []),
-  { id: 'gpt-5.2', label: 'GPT 5.2', desc: 'Best code agent — OpenAI API key', color: 'bg-yellow' },
-  { id: 'o3', label: 'o3', desc: 'Reasoning — OpenAI API key', color: 'bg-yellow' },
-];
+import { MODELS } from '../lib/constants';
 
 export function SettingsPanel() {
   const settings = useSettings();
@@ -169,7 +159,7 @@ export function SettingsPanel() {
                     onChange={() => settings.update({ defaultModel: m.id })}
                     className="hidden"
                   />
-                  <div className={`w-2.5 h-2.5 rounded-full ${m.color}`} />
+                  <div className={`w-2.5 h-2.5 rounded-full ${m.bgColor}`} />
                   <div>
                     <p className="text-xs font-medium text-text">{m.label}</p>
                     <p className="text-[10px] text-muted">{m.desc}</p>
