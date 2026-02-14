@@ -183,7 +183,8 @@ export function ChatPanel() {
 
             if (event.type === 'step') {
               const update = { status: event.status as AgentStream['status'], label: event.label };
-              if (event.agent === 'opus' && event.label.includes('Review')) {
+              const lbl = (event.label || '').toLowerCase();
+              if (event.agent === 'opus' && (lbl.includes('review') || lbl.includes('combining'))) {
                 setOpusReview(prev => ({ ...prev, ...update }));
               } else if (event.agent === 'opus') {
                 setOpusAnalysis(prev => ({ ...prev, ...update }));
@@ -193,17 +194,17 @@ export function ChatPanel() {
                 setCodexStream(prev => ({ ...prev, ...update }));
               }
             } else if (event.type === 'token') {
-              // Route tokens to the correct agent panel
               if (event.agent === 'sonnet') {
                 setSonnetStream(prev => ({ ...prev, content: prev.content + event.text }));
               } else if (event.agent === 'codex') {
                 setCodexStream(prev => ({ ...prev, content: prev.content + event.text }));
               } else if (event.agent === 'opus') {
-                // Check if we're in review phase
+                // Route opus tokens to review panel if review is running, otherwise to analysis
                 setOpusReview(prev => {
                   if (prev.status === 'running') return { ...prev, content: prev.content + event.text };
                   return prev;
                 });
+                // Only route to analysis if review is NOT running
                 setOpusAnalysis(prev => {
                   if (prev.status === 'running') return { ...prev, content: prev.content + event.text };
                   return prev;

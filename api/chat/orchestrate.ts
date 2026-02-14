@@ -213,18 +213,35 @@ export default async function handler(req: Request) {
 
       await Promise.all(tasks);
 
-      // Step 3: Opus review
-      await send('step', { agent: 'opus', label: 'Opus reviewing & combining...', status: 'running' });
-      let reviewPrompt = `Task: ${plan.summary}\n\n`;
-      if (results.design) reviewPrompt += `## Sonnet Design:\n${results.design}\n\n`;
-      if (results.code) reviewPrompt += `## Codex Code:\n${results.code}\n\n`;
-      reviewPrompt += 'Combine into a polished final response.';
+      // Step 3: Combine results
+      const hasDesign = !!results.design?.trim();
+      const hasCode = !!results.code?.trim();
 
-      const finalText = await streamAnthropic(anthropicKey, 'claude-opus-4-6', REVIEW_SYSTEM,
-        [...messages, { role: 'user', content: reviewPrompt }], writer, encoder, 'opus');
-      await send('step', { agent: 'opus', label: 'Review complete', status: 'done' });
+      if (hasDesign && hasCode) {
+        // Both agents produced output — quick Opus merge (truncate to avoid huge prompts)
+        await send('step', { agent: 'opus', label: 'Opus reviewing & combining...', status: 'running' });
+        const designSnippet = results.design!.length > 6000 ? results.design!.slice(0, 6000) + '\n... [truncated]' : results.design!;
+        const codeSnippet = results.code!.length > 6000 ? results.code!.slice(0, 6000) + '\n... [truncated]' : results.code!;
+        const reviewPrompt = `Task: ${plan.summary}\n\n## Design:\n${designSnippet}\n\n## Code:\n${codeSnippet}\n\nMerge into ONE complete response with all code in markdown blocks. Be brief, output the final code.`;
 
-      await send('done', { content: finalText });
+        const finalText = await streamAnthropic(anthropicKey, 'claude-sonnet-4-5-20250929', REVIEW_SYSTEM,
+          [{ role: 'user', content: reviewPrompt }], writer, encoder, 'opus');
+        await send('step', { agent: 'opus', label: 'Review complete', status: 'done' });
+        await send('done', { content: finalText });
+      } else if (hasCode) {
+        // Only GPT code — skip review, use code directly
+        await send('step', { agent: 'opus', label: 'Review complete (code only)', status: 'done' });
+        await send('done', { content: results.code! });
+      } else if (hasDesign) {
+        // Only Sonnet design — skip review, use design directly
+        await send('step', { agent: 'opus', label: 'Review complete (design only)', status: 'done' });
+        await send('done', { content: results.design! });
+      } else {
+        // Nothing produced
+        await send('step', { agent: 'opus', label: 'No output produced', status: 'error' });
+        await send('done', { content: plan.summary + '\n\n*No code or design was generated. Check your API keys in Settings.*' });
+      }
+
       await writer.write(encoder.encode('data: [DONE]\n\n'));
     } catch (err: unknown) {
       await send('error', { message: err instanceof Error ? err.message : 'Unknown error' });

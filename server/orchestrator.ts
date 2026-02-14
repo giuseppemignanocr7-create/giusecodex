@@ -189,16 +189,31 @@ export async function orchestrate(
 
   await Promise.all(tasks);
 
-  // Step 3: Opus reviews and combines
-  config.onStep({ agent: 'opus', label: 'Opus reviewing & combining...', status: 'running' });
+  // Step 3: Combine results
+  const hasDesign = !!results.design?.trim();
+  const hasCode = !!results.code?.trim();
 
-  const reviewPrompt = buildReviewPrompt(plan, results, codeAgent);
-  const reviewMessages = [...messages, { role: 'user', content: reviewPrompt }];
-  const finalResponse = await callAnthropic(anthropic, 'claude-opus-4-6', OPUS_REVIEW_SYSTEM, reviewMessages, config, 'opus');
+  if (hasDesign && hasCode) {
+    // Both agents produced output — quick merge with Sonnet (faster than Opus)
+    config.onStep({ agent: 'opus', label: 'Reviewing & combining...', status: 'running' });
+    const designSnippet = results.design!.length > 6000 ? results.design!.slice(0, 6000) + '\n... [truncated]' : results.design!;
+    const codeSnippet = results.code!.length > 6000 ? results.code!.slice(0, 6000) + '\n... [truncated]' : results.code!;
+    const reviewPrompt = `Task: ${plan.summary}\n\n## Design:\n${designSnippet}\n\n## Code:\n${codeSnippet}\n\nMerge into ONE complete response with all code in markdown blocks. Be brief, output the final code.`;
 
-  config.onStep({ agent: 'opus', label: 'Final review complete', status: 'done' });
-
-  return finalResponse;
+    const finalResponse = await callAnthropic(anthropic, 'claude-sonnet-4-5-20250929', OPUS_REVIEW_SYSTEM,
+      [{ role: 'user', content: reviewPrompt }], config, 'opus');
+    config.onStep({ agent: 'opus', label: 'Review complete', status: 'done' });
+    return finalResponse;
+  } else if (hasCode) {
+    config.onStep({ agent: 'opus', label: 'Review complete (code only)', status: 'done' });
+    return results.code!;
+  } else if (hasDesign) {
+    config.onStep({ agent: 'opus', label: 'Review complete (design only)', status: 'done' });
+    return results.design!;
+  } else {
+    config.onStep({ agent: 'opus', label: 'No output produced', status: 'error' });
+    return plan.summary + '\n\n*No code or design was generated. Check your API keys in Settings.*';
+  }
 }
 
 // ──── Helpers ────

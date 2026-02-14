@@ -12,7 +12,10 @@ import { useChat } from './stores/chatStore';
 import { Terminal as TerminalIcon, Globe } from 'lucide-react';
 
 function containsPreviewableHtml(content: string): boolean {
-  return /```html\s*[\r\n][\s\S]*?```/i.test(content) || /<(!DOCTYPE|html)[\s\S]*<\/html>/i.test(content);
+  // Match ```html code blocks, full HTML documents, or standalone HTML with body/head/script tags
+  return /```html\s*[\r\n][\s\S]*?```/i.test(content)
+    || /<(!DOCTYPE|html)[\s\S]*<\/html>/i.test(content)
+    || (/<(body|head|style|script|div|section|main)[\s>]/i.test(content) && /<\/(body|div|section|main|script)>/i.test(content));
 }
 
 export function App() {
