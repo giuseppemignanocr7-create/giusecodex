@@ -1,7 +1,7 @@
 // NOTE: Do NOT import monaco-editor here — it would pull the entire bundle.
 // Instead, receive the monaco namespace from the caller.
 
-const isLocalhost = typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
+const isServerless = typeof window !== 'undefined' && window.location.hostname.includes('vercel.app');
 
 let debounceTimer: ReturnType<typeof setTimeout> | null = null;
 let abortController: AbortController | null = null;
@@ -73,7 +73,7 @@ Completion:`;
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export function registerInlineCompletion(editor: any): void {
   // Only register the provider once globally
-  if (registered || !isLocalhost) return;
+  if (registered || isServerless) return;
   registered = true;
 
   // Get the monaco namespace from the editor's internal reference

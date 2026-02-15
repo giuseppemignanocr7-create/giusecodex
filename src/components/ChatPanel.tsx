@@ -360,9 +360,9 @@ export function ChatPanel() {
     const provider = modelInfo?.provider || 'anthropic';
     const assistantRole: AgentRole = provider === 'codex-cli' || provider === 'openai' ? 'codex' : normalizedModel.includes('haiku') ? 'haiku' : normalizedModel.includes('opus') ? 'opus' : 'sonnet';
 
-    // Inject tool definitions for code mode on localhost
-    const isLocal = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
-    const sysPrompt = isLocal && chatMode === 'code' ? systemPrompt + TOOL_DEFINITIONS : systemPrompt;
+    // Inject tool definitions for code mode (disabled on serverless only)
+    const isServerless = window.location.hostname.includes('vercel.app');
+    const sysPrompt = !isServerless && chatMode === 'code' ? systemPrompt + TOOL_DEFINITIONS : systemPrompt;
 
     const assistantMsg: ChatMessage = {
       id: crypto.randomUUID(),
@@ -380,7 +380,7 @@ export function ChatPanel() {
       await streamOnce(chatHistory, sysPrompt, settings, provider, abort);
 
       // Agent tool loop (max 5 rounds)
-      if (isLocal && chatMode === 'code') {
+      if (!isServerless && chatMode === 'code') {
         let runningHistory = [...chatHistory];
         for (let round = 0; round < 5; round++) {
           const lastContent = useChat.getState().messages.at(-1)?.content || '';

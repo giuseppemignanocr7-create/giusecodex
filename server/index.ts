@@ -510,10 +510,21 @@ app.get('/api/git/diff', async (req, res) => {
   res.json({ diff: r.stdout });
 });
 
+// ──── Serve frontend build (production / VPS) ────
+const distDir = path.join(import.meta.dirname || __dirname, '..', 'dist');
+if (fsSync.existsSync(distDir)) {
+  app.use(express.static(distDir));
+  // SPA fallback: any non-API route serves index.html
+  app.get('*', (_req, res) => {
+    res.sendFile(path.join(distDir, 'index.html'));
+  });
+  console.log(`Serving frontend from ${distDir}`);
+}
+
 // ──── Start ────
 
 const PORT = parseInt(process.env.PORT || '4000');
-const HOST = process.env.HOST || '127.0.0.1';
+const HOST = process.env.HOST || '0.0.0.0';
 const server = http.createServer(app);
 
 // ──── WebSocket Terminal ────

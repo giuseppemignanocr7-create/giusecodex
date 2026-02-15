@@ -4,7 +4,8 @@ import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import '@xterm/xterm/css/xterm.css';
 
-const isLocalhost = typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
+// Detect if running via Vercel (serverless = no terminal backend)
+const isServerless = typeof window !== 'undefined' && window.location.hostname.includes('vercel.app');
 
 export function TerminalPanel() {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -38,14 +39,14 @@ export function TerminalPanel() {
     termRef.current = term;
     fitRef.current = fit;
 
-    if (!isLocalhost) {
-      term.writeln('\x1b[33m⚠ Terminal requires local server (npm run dev)\x1b[0m');
-      term.writeln('\x1b[90mDeploy to Vercel does not support shell access.\x1b[0m');
+    if (isServerless) {
+      term.writeln('\x1b[33m⚠ Terminal not available on serverless deployments\x1b[0m');
+      term.writeln('\x1b[90mDeploy to a VPS (e.g. Hetzner) for full terminal access.\x1b[0m');
       return;
     }
 
-    const port = window.location.port || '4000';
-    const ws = new WebSocket(`ws://localhost:${port}/ws/terminal`);
+    const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const ws = new WebSocket(`${proto}//${window.location.host}/ws/terminal`);
     wsRef.current = ws;
 
     ws.onopen = () => {

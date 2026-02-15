@@ -20,7 +20,7 @@ const STATUS_ICONS: Record<string, { icon: typeof Plus; color: string; label: st
   'AM': { icon: Plus, color: 'text-green', label: 'Added+Modified' },
 };
 
-const isLocalhost = typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
+const isServerless = typeof window !== 'undefined' && window.location.hostname.includes('vercel.app');
 
 export function GitPanel() {
   const [isRepo, setIsRepo] = useState(false);
@@ -34,7 +34,7 @@ export function GitPanel() {
   const [tab, setTab] = useState<'changes' | 'log'>('changes');
 
   const refresh = useCallback(async () => {
-    if (!isLocalhost) return;
+    if (isServerless) return;
     setLoading(true);
     try {
       const res = await fetch('/api/git/status');
@@ -93,11 +93,11 @@ export function GitPanel() {
     setPushLoading(false);
   };
 
-  if (!isLocalhost) {
+  if (isServerless) {
     return (
       <div className="h-full flex flex-col items-center justify-center bg-surface px-4">
         <GitBranch className="w-6 h-6 text-muted/20 mb-2" />
-        <p className="text-muted text-xs text-center">Git requires local server (npm run dev)</p>
+        <p className="text-muted text-xs text-center">Git not available on serverless deployments</p>
       </div>
     );
   }
